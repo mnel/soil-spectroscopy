@@ -1408,6 +1408,7 @@ grid.text(x = 0.62, y = 0.97, label = '(c)')
 ## ########################################################
 ## clean up
 rm(list = c('clay_mineral_diagnostics', 'clay_mineral_quantiles', 'clay_mineral_reference'))
+##
 invisible(gc())
 ##
 ## ########################################################
@@ -2158,6 +2159,8 @@ mahalanobis_outlier <- function(value, variable, .id_column, plsr_scores = 5, .s
   ##
   ## return data frame  showing which samples are outliers
   potential_outlier <- !as.logical(outlier_test$wfinal01)
+  ##
+  ## return
   return(data.frame(potential_outlier, row_index = id_samples))
   ##
   }
@@ -2562,28 +2565,74 @@ We present a number of approaches, one using the continuum-removed spectra one o
  The wavelet coefficients are used in a generalized validation procedure where, having removed the multivariate outliers, we order the samples and removed every third value as a validation data set.
 \subsubsection{Continuum-removed spectra}
 Here, we calculate the wavelet coefficients for a Daubechies wavelet function with 2 vanishing moments. We use the deviations from the continuum of the reflectance. 
-<<wavelets-cr, echo = F, cache = T, results = hide>>=
-## a function for processing wavelets
-waveletFunction <- function(.spectra, .preProcess,.subRows, .resultsNames){
+<<functions-filter-wavelets, echo = F, cache = T, results = hide, depends = functions-basic>>=
+## ########################################################
+get_wavelet_coefficients <- function(wd_object,.lev,max  = 2048 ,offset = 404, ... ){
+  ##
+  coefs <- accessD(wd_object,.lev)
+  ##
+  names(coefs) <- name_bandcentre(.lev, max = max, offset = offset)
+  ##
+  coefs
+  ##
+}
+## ########################################################
+get_bandcentre <- function(.lev,max  = 2048 ,offset = 404){
+  ## identify the bandcentres for a level of wavelet
+  ## decomposition
+  ##
+  offset + seq( max / 2^(.lev + 1), max, by = max / 2^(.lev) )
+  ##
+}
+## ########################################################
+name_bandcentre <-  function(.lev,max  = 2048 ,offset = 404){
+  ## Get a name that identifies the scale and bandcentre
+  ## for a wavelet coefficients
+  ## 
+  ## get the bandcentre
+  .level <- get_bandcentre(.lev, max = max, offset = offset)
+  ##
+  ## create the name
+  paste('w', .level, .lev, sep = '.')
+  ##
+}
+## ########################################################
+filter_wavelets <- function(.spectra_path, .spectra_name, .filter, rows_training, rows_validation, id_samples, value, variable,.keep, .scales, .save_path, ...){
+  ## a function for filtering wavelets using wd
+  ##
   ## load spectra
-  spectra <- loadRename(.spectra$.fname, .spectra$.name)
-  ## pre processe
-  if(.preProcess$.type  == 'CR'){
-    processedSpectra <- t(apply(spectra,1, cHullDeviation, rangeB = .preProcess$.range))
-  }
-  
-  if(.preProcess$.type == 'none'){
-    processedSpectra <- spectra[,.preProcess$.range]
-  }
-  
-  if(.preProcess$.type == 'SGD1'){
-    processedSpectra <- spectra[,.preProcess$.range]
-  }
-  ## calculate the wavelet decomposition
-  waveletInterval <- apply(processedSpectra, 1,wd, bc = 'interval', filter.number = 2,
-                    family = 'DaubExPhase', min.scale = 2 )
+  spectra <- load_as(.file_path = .spectra_path, .name  = .spectra_name)[,.keep]
+  ##
+  ## calculate the wavelet decomposition -- returns
+  ## a list of wavelet decompositions
+  ## one for each row (spectrum)
+  wavelet_interval <- alply(spectra, 1,wd, bc = 'interval', filter.number = 2, family = 'DaubExPhase', min.scale = 2 )
+  ## 
   ## extract the wavelet coefficients
-  wvCoefs <- ldply(waveletInterval, function(x){unlist(llply(2:10,waveCoefs, wdObject=x))})
+  wavelet_coefficients <- ldply(wavelet_interval, function(x){unlist(llply(.scales, get_wavelet_coefficients , wd_object = x))})
+  ##
+  ## name the objects and save  
+  wavelet_name <- paste(.spectra_name, 'wavelet', sep = '_')
+  ##
+  coefficients_name <- paste(.spectra_name, 'wavelet_coefficients', sep = '_')
+  ##
+  save_as(wavelet_interval, .file_path = .save_path, .name = wavelet_name)
+  ##
+  save_as(wavelet_coefficients, .file_path = .save_path, .name = coefficients_name)
+  ##
+  ## return the coefficients
+  return(wavelet_coefficients)
+  ##
+}
+## ########################################################
+@
+
+<<analysis-filter-wavelets, echo = T, results = hide, cache = T, dependson = functions-filter-wavelets>>=
+## ##################################################### ##
+## Perform wavelet-on-the-interval decomposition         ##
+## Debaucheries wavelets with 2 vanishing moments        ##
+## ##################################################### ##
+
   ## calculate the variance (removing the subset rows)
   coefVars <- apply(wvCoefs[.subRows,], 2, var)
   ## and the order
