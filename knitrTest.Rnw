@@ -1,0 +1,3628 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[sc]{mathpazo}
+\renewcommand{\sfdefault}{lmss}
+\renewcommand{\ttdefault}{lmtt}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{titlesec}
+\heavyrulewidth = 2\lightrulewidth
+\geometry{verbose,tmargin=2.5cm,bmargin=2.5cm,lmargin=2.5cm,rmargin=2.5cm}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+\usepackage{url}
+\usepackage[authoryear]{natbib}
+\bibliographystyle{plainnat}
+\usepackage[unicode=true,pdfusetitle,
+ bookmarks=true,bookmarksnumbered=true,bookmarksopen=true,bookmarksopenlevel=2,
+ breaklinks=false,pdfborder={0 0 1},backref=false,colorlinks=false]
+ {hyperref}
+\hypersetup{
+ pdfstartview={XYZ null null 1}}
+\usepackage{breakurl}
+\usepackage[authoryear]{natbib}
+\usepackage{titling}
+\pretitle{\begin{flushleft}\LARGE}
+\posttitle{\par\end{flushleft}\vskip 0.5em}
+\preauthor{\begin{flushleft}\large \lineskip 0.5em}
+\postauthor{\par\end{flushleft}}
+\predate{\begin{flushleft}\itshape}
+\postdate{\par\end{flushleft}\rule{\linewidth}{0.25mm}}
+%\textwidth15.5cm
+
+\newcommand{\raca} {{\sf RaCA}}
+
+\newcommand{\R} {{\sf R}}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{2ex plus 0.5ex minus 0.2ex}
+
+\titleformat{\section}
+{\normalfont\Large\sl}{\thesection}{1em}{}
+\titleformat{\subsection}
+{\normalfont\large\sf}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}
+{\normalfont\normalsize \sc}{\thesubsubsection}{1em}{}
+\titleformat{\paragraph}[runin]
+{\normalfont\normalsize \itshape}{\theparagraph}{1em}{}
+\titleformat{\subparagraph}[runin]
+{\normalfont\normalsize \itshape}{\thesubparagraph}{1em}{}
+
+\titlespacing*{\section} {0pt}{2ex plus 1ex minus .2ex}{2.3ex plus .2ex}
+\titlespacing*{\subsection} {0pt}{1.5ex plus 1ex minus .2ex}{1.5ex plus .2ex}
+\titlespacing*{\subsubsection}{0pt}{1.5ex plus 1ex minus .2ex}{1.5ex plus .2ex}
+\titlespacing*{\paragraph} {0pt}{1.5ex plus 1ex minus .2ex}{1em}
+\titlespacing*{\subparagraph} {\parindent}{1.5ex plus 1ex minus .2ex}{1em}
+
+\title{The \raca{} project  ::  A soil spectral inference system using  legacy data}
+\author{Michael Nelson, Budiman Minasny \& Alex McBratney}
+\date{Faculty of Agriculture, Food and Natural Resources \\ The University of Sydney}
+
+\begin{document}
+\baselineskip18pt
+% \SweaveOpts{fig.path=figure/manual-,cache.path=cache/manual-,fig.align=center,external=TRUE,fig.show = hold}
+
+<<setup,echo=FALSE,results=hide,message=FALSE>>=
+options(replace.assign=TRUE,width=90)
+knit_hooks$set(fig=function(before, options, envir){if (before) par(mar=c(4,4,.1,.1),cex.lab=.95,cex.axis=.9,mgp=c(2,.7,0),tcl=-.3)})
+setwd('c:/Research/Spectra/calibrationReport')
+owd <- getwd()
+@
+
+
+\maketitle
+\section*{Summary}
+\noindent
+This document sets out the development of a soil spectral inference system as part of  the \raca{} project. 
+Specifically it details the preparation of spectra and development of models for various soil properties using these processed visible--near-infrared (vis-NIR) spectra from a database of soil samples provided by the {\sf USDA-NRCS} as part of the \raca{} project.
+These models will be used in the development of a classification models to pre-classify spectra collected through the  \raca{} project to improve, i.e.\ refine the soil carbon model.
+
+
+\section{ Exploratory data analysis}
+
+<<setup-libraries, echo = F, cache=T,results=hide, warning =  F, message = F>>=
+## ########################################################
+## load the required libraries into R
+library(signal) ; library(pls);  library(ggplot2); library(tikzDevice); library(treemap); library(gridExtra); library(munsell); library(Hmisc); library(Cubist); library(xtable); library(wavethresh); library(mvoutlier); library(stringr)
+##
+## ########################################################
+@
+
+<<functions-basic, echo = F, cache = T, warning = F, message = F, dependson = setuplibraries>>=
+## ########################################################
+##
+## some functions required for the calibration report for the RaCA project.
+##
+## ########################################################
+load_as <- function(.name, .file_path, .ext = '.RData'){
+  ## a function that loads a saved R object from a file
+  ## so you can rename it
+  load(file.path(as.character(.file_path), paste(as.character(.name),as.character(.ext), sep= '')))
+  .df <- get(as.character(.name))
+  return(.df)
+  }
+## ########################################################
+save_as <- function(.object, .name, .file_path, .ext = '.RData',...){
+  ## a function that allows you to save an object to file, with a different name to 
+  ## that within your workspace
+  ## object = an 'R' object
+  ## .fname = the file name you wish to save it as
+  ## .name = the name within that file
+  assign(.name, .object)
+  save(list = .name, file = file.path(as.character(.file_path), paste(as.character(.name), as.character(.ext), sep = ''))) 
+  }
+## ########################################################
+table_to_data.frame <- function(.x, .name = 'id'){
+  ## a function that creates a 1-d table
+  ## and convert it to a data frame
+  ## create table
+  table_x <- table(.x)
+  ## make data.frame
+  .df <- data.frame(.names = names(table_x), count = as.numeric(table_x))
+  names(.df)[1] <- .name
+  return(.df)
+}
+## ########################################################
+length_NA <- function(.vector){length(na.omit(unlist(.vector)))}
+## ########################################################
+length_unique <- function(.data,.variable,...){length(unique(.data[,.variable]))}
+## ########################################################
+booktabs.xtable <- function(.xtable,...){
+  ## formats an xtable for book tabs
+  print(.xtable,sanitize.text.function = function(x){x},floating=FALSE,hline.after=NULL,
+                  add.to.row=list(pos=list(-1,0, nrow(.xtabl)),command=c('\\toprule ','\\midrule ','\\bottomrule ')))
+  }
+## ########################################################
+drop0trailing.format <- function(x, ...) {
+  format(x,drop0trailing=T)
+  }
+## ########################################################
+combine_list <- function(.x, .which_x, .y, .which_y, .id.var){
+  ## create list
+  list_x <- as.list(.x)
+  unique_id <- unique(list_x[[.id.var]])
+  ## add from
+  list_y <- as.list(.y[[unique_id]][.which_y])
+  c(list_x[.which_x],list_y)
+  }
+##
+## ########################################################
+
+@
+
+
+
+<<set-seed, echo = F,cache=T,results=hide, dependson = setup-libraries>>=
+## ########################################################
+##
+## Set the random seed. This allows any `random' components
+## to be repeated with the same results. 
+set.seed(271011)
+##
+## set the memory limit as high as possible
+memory.limit(size=4095)
+##
+## ########################################################
+@
+
+<<organize-create-directories, echo = F, cache = T, results = hide>>=
+## ########################################################
+##
+## create directories for saved data
+saved_data_directory <- 'saved_data'
+dir.create(path = saved_data_directory)
+##
+## for raw spectra
+raw_spectra_directory <- file.path(saved_data_directory,'spectra_raw')
+dir.create( path = raw_spectra_directory)
+##
+## for processed spectra
+processed_spectra_directory <- file.path(saved_data_directory,'spectra_processed')
+dir.create(path = processed_spectra_directory)
+##
+## ########################################################
+@
+
+<<organize-file-locations, echo = F, cache = T, results = hide>>=
+## ########################################################
+##
+## set some locations on the computer
+##
+## base directory
+base_directory <- 'c:/Research/Spectra'
+##
+## sub directory with reflectance spectra as ascii
+reflectance_directory <- file.path(base_directory, 'asciiSpectra')
+##
+## sub directory with absorbance spectra as ascii
+absorbance_directory <-  file.path(base_directory,'asc1_R')
+##
+## file with sample information
+properties_file <- 'new_soil_properties.csv' 
+##
+## ########################################################
+@
+
+
+<<readin-soildata, echo = F, cache = T, results = hide, warning =  F, dependson = organize-file-locations>>=
+## ########################################################
+##
+## read in the sampled soil property data 
+##
+## read in 
+soil_data <- read.csv(file.path(base_directory,properties_file), header=T)
+##
+## perform housekeeping
+##
+## remove 'dB columns
+soil_data <- soil_data[,-c(17:21)]
+##
+## rename to a standard convention
+new_names <- c('lab_project_name', 'user_pedon_id', 'lab_horizon_id', 'user_horizon_id',
+              'horizon_designation', 'horizon_top', 'horizon_bottom', 'vnir_name',
+              'total_C', 'CaCO3', 'est_org_C', 'clay', 'sand', 'cec_clay_ratio', 
+              'taxonomy', 'lab_texture', 'pH_water', 'pH_CaCl', 'cec_NH4', 'fe_CD')
+names(soil_data) <- new_names
+##
+## which columns are  the soil properties in?
+which_properties <- names(soil_data)[c(9:14,17:20)]
+## 
+## save organized data.frame and clean up
+save(soil_data,file= file.path(saved_data_directory,'soil_data.RData'))
+invisible(gc())
+##
+## ########################################################
+@
+
+<<functions-summary, echo = F, cache = T, results = hide, dependson = functions-basic>>=
+## ########################################################
+##
+## functions to do with summarizing data
+## and organizing data for latex viewing
+##
+## ########################################################
+properties_to_latex <- Vectorize(function(.name){
+  ## a function that goes from the column names to latex happy versions
+switch(as.character(.name) ,
+  'clay' = 'Clay', 'sand' = 'Sand', 'total_C' = 'Total C', 
+  'est_org_C' = 'Organic C', 'cec_clay_ratio' = 'CEC:Clay', 
+  'pH_water' = 'pH (Water)', 'pH_CaCl' = 'pH $ \\left( {\\rm CaCl_2 } \\right)$',
+   'cec_NH4' = 'CEC', 'fe_CD' = 'Iron Oxide', 'CaCO3' = '${\\rm CaCO_3}$'      ) 
+})
+## ########################################################
+n_unique_ids <- Vectorize(
+  function(.data, .var, .id){
+    length(unique(.data[!is.na(.data[,.var]), .id]))
+    }, 
+  vectorize.args = '.var')
+## ########################################################
+@
+
+
+
+
+<<analysis-summarize-soil-samples, echo = F, results = hide, warning =  F,cache = F, fig.keep=none, dependson = functions-summary; readin-soildata>>=
+## ########################################################
+##
+## perform some summaries of the soil property data
+## 
+## how many samples with spectra recorded
+n_spectra <- nrow(soil_data)
+##
+## melt soil_data for further analysis
+molten_soil_variables <- melt(data.frame(soil_data,.row_index = 1:nrow(soil_data)), id.vars = c('user_pedon_id', 'lab_project_name','lab_horizon_id','.row_index'),measure.vars = which_properties, na.rm=T)
+##
+## how many samples recorded for each variable
+n_each_var <-  cast(molten_soil_variables, variable~.)
+names(n_each_var)[2] <- 'count_samples'
+##
+## how many separate profiles  
+n_profiles <- length( levels( soil_data$user_pedon_id))
+##
+## and for each variable
+n_each_var$count_profiles <- daply(molten_soil_variables, .(variable), .fun = splat( function( user_pedon_id, ...){ count_profiles <- length(unique(user_pedon_id))}))
+##
+## how many profiles with taxonomy recorded
+n_profiles_taxonomy <- table_to_data.frame(ddply(soil_data, c('user_pedon_id'),   splat( function(taxonomy, ...){data.frame( taxonomy = unique(taxonomy))}))$taxonomy, .name  = 'taxonomy')[-1,]
+##
+## how many separate profiles with taxonomy recorded
+total_profiles_taxonomy <- sum(n_profiles_taxonomy$count)
+##
+## organize some of this information
+sample_numbers <- llist(n_spectra, n_profiles, n_each_var, n_profiles_taxonomy)
+##
+## save this information
+save(n_profiles_taxonomy, file = file.path(saved_data_directory,'n_profiles_taxonomy.RData'))
+save(sample_numbers, file  = file.path(saved_data_directory,'sample_numbers.RData'))
+save(molten_soil_variables,file  = file.path(saved_data_directory,'molten_soil_variables.RData'))
+## 
+## clean up
+rm(molten_soil_variables)
+invisible(gc())
+##
+## ########################################################
+@
+
+In its current form (\today{}), the dataset contains \Sexpr{n_spectra} samples and their spectra. 
+These samples come from \Sexpr{n_profiles} profiles.
+Soil properties included at the moment are Total Carbon, ${\rm CaCO_3}$, estimated Organic carbon, Clay, Sand, CEC : Clay ratio, Taxonomy, lab texture, pH in water, pH in ${\rm CaCl_2}$, CEC and Fe. 
+Total Carbon and estimated organic carbon have values for all samples. Other soil properties have numerous missing values.
+
+\subsection{USDA soil taxonomy}
+Of the \Sexpr{n_profiles} individual profiles, \Sexpr{total_profiles_taxonomy} have been classified to USDA soil taxonomy order level. 
+Figure~\ref{fig:taxonomy} shows the relative proportions of each USDA soil Taxonomy order for the \Sexpr{total_profiles_taxonomy} profiles with recorded classifications. The recorded profiles are predominantly alfisols and mollisols.
+<<analysis-treeplot-taxonomy,echo=F,cache = T,results=hide,fig.keep=none>>=
+## ########################################################
+##
+## create a treemap of the taxonomy
+##
+## load the required data
+load('savedData/numbers.RData')
+load('savedData/summaryTax.RData')
+##
+## create the tree plot of the taxonomy  using tmPlot
+tree_taxonomy <- ddply(data.frame(tmPlot(n_profiles_taxonomy, 'taxonomy', 
+  vSize = 'count', sortID = '-size',saveTm=T)[[1]][[1]], count = n_profiles_taxonomy$count),
+  .(ind), function(x){ data.frame(x, name_count =paste(x$ind,x$count,sep= '  \n '))})
+##
+## this will be used with ggplot to make the map
+##
+## ########################################################
+@
+
+\begin{figure}[tbp]
+\centering
+<<figure-treeMapPlot, fig=T, dev=tikz,echo=F, out.width = \textwidth, fig.width = 7, fig.height = 3.5,background = 1;1;1, cache = T,dependson = analysis-treeplot-taxonomy>>=
+## ########################################################
+##
+## use ggplot to plot the tree map for taxonomy
+ggplot(tree_taxonomy, aes(xmin = x0,ymin = y0, ymax = y0 + h, xmax = x0 + w)) + 
+  geom_rect(aes(fill = ind,col = ind )) + 
+  geom_text(aes(x=x0+ w/2,y = y0 + h/2,label=name_count, size=count)) + 
+  opts(axis.text.x = theme_blank(), axis.text.y = theme_blank(), 
+    axis.ticks = theme_blank(), axis.title.y = theme_blank(), 
+    axis.title.x = theme_blank(), panel.background = theme_blank(), 
+    legend.position = 'none') +
+  scale_fill_manual(values = rev(brewer.pal(n=12,name='Set3')))+ 
+  scale_colour_manual(values = rev(brewer.pal(n=12,name='Set3')))+
+  scale_size(to = c(2,7))+
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0))
+##
+## ########################################################
+@
+\caption{Treemap showing the relative proportions of the \Sexpr{total_profiles_taxonomy} profiles with recorded classifications}\label{fig:taxonomy}
+\end{figure}
+
+\subsection{Soil attributes}
+Table~\ref{table:nSamples} sets out the number of samples and unique samples for each laboratory-measured soil attribute. The distributions are shown in figure~\ref{fig:histograms}
+
+
+
+\begin{table}[tbp]
+\caption{Number of samples and unique profiles for each soil attribute}
+\label{table:nSamples}
+\centering
+<<table-results-unique, echo=F, results = tex, cache = T , dependson = setup-libraries; functions-basic; analysis-summarize-soil>>=
+## ########################################################
+##
+## create a table of the profile counts
+## formatted for use with  booktabs in LaTeX
+##
+## get the  appropriate  rows
+table_samples <- n_each_var[c(9:14,17:20),]      
+##
+## latexify names
+row.names(table_samples) <- properties_to_latex(table_samples$.property)
+names(table_samples)[2:3] <- c('Samples','Profiles')
+##
+## make xtable object
+xtable_samples <- xtable(table_samples[,2:3], digits=0)
+##
+## print nicely
+booktabs.xtable(xtable_samples)
+##
+## ########################################################
+@
+\end{table}
+
+
+\begin{figure}[tbp]
+\centering
+<<figure-density-plots, fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 7, fig.height = 9,background = 1;1;1, cache=T, dependson = analysis-create-histograms,warning=F>>=
+## ########################################################
+##
+## create and display density plots of the soil properties
+## using ggplot
+##
+## load required data
+load(file.path(saved_data_directory,'molten_soil_variables.RData'))
+##
+## add latex names
+molten_soil_variables$latex_id <- with(molten_soil_variables,properties_to_latex(variable))
+##
+## make plot
+ggplot(molten_soil_variables, aes(x=value)) + 
+  geom_density() + 
+  facet_wrap(~latex_id,scales='free', ncol=2)+
+  opts(panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(), strip.background = theme_blank())
+##
+## clean up
+rm(molten_soil_variables)
+invisible(gc())
+## 
+## ########################################################
+@
+\caption{Density plots showing the distributions of the laboratory-measured soil attributes}\label{fig:histograms}
+\end{figure}
+
+\section{Visible--near-infrared spectra}
+The raw spectra were converted to ascii files of reflectance and absorbance using {\sf ViewSpec Pro}. In \R{}, we smooth the  vis-NIR spectra with a Sativksy-Golay filter, fitting quadratic polynomials to a moving 11-wavelength window. Using this smoothed data, we calculate the first derivative.
+
+<<functions-readin, echo=F, results = hide, cache = T, dependson = functions-basic;functions-summary>>=
+## ########################################################
+##
+## functions to read in spectral data from ascii files
+##
+## ########################################################
+read_column <- function(.id, .file_path, .ext, .column, header = T,...){
+  ##  a function to read in a single column from a csv file
+  read.csv(file.path(.file_path, paste(.id, .ext, sep = '')), header = header)[,.column]
+  }
+## ########################################################
+read_spectra <- function(.id, .file_path, .ext = '.txt', .column = 2, header = T, ...){
+  ## a function to read in spectra
+  ## from multiple files
+  ## read in using.id as the file name
+  spectra_list <- llply(.id, .fun = read_column, 
+        .file_path = .file_path, .ext = .ext, .column = .column, header = header)
+  ## combine into a matrix
+  spectra <- do.call('rbind', spectra_list)
+  }
+## ########################################################
+read_save_spectra <- function(.id, .file_path, .ext = '.txt', .column = 2, header = T, .save_path, .type, .save_id, .save_ext = '.RData', ...){
+  ## a function to
+  ## read in spectral information, save it as an R object
+  ## and return the name and file path
+  ##
+  ## read in spectra
+  spectra <- read_spectra(.id = .id, .file_path = .file_path, .ext = .ext, .column = .column, header = T)
+  ## save spectra 
+  ## create name
+  .save_name = paste(.type, .save_id, sep = '_')
+  ## save as
+  save_as(.object = spectra , .name = .save_name , .file_path = .save_path, .ext = .save_ext)
+  ## return the file names and paths
+  data.frame(.type, .spectra_path = .save_path, .spectra_name = .save_name, .spectra_ext =.save_ext)
+  }
+## ########################################################
+trim_spectra <- function(.spectra_path, .spectra_name, .spectra_ext, .keep,.keep_id, .type, .save_path, .save_ext = '.RData', ... ){
+  ## ######################################################
+  ## a function to trim spectra to a particular          ##
+  ## subset of wavelengths (keep)                        ## 
+  ## ######################################################
+  ## load spectra from file
+  spectra <- load_as(.name = .spectra_name, .file_path = .spectra_path, .ext = .spectra_ext)
+  ## trim
+  trimmed_spectra <- spectra[,.keep]
+  ## create object name
+  .save_name = paste(.type, .keep_id, sep = '_')
+  ## save 
+  save_as(.object = trimmed_spectra , .name = .save_name , .file_path = .save_path, .ext = .save_ext)
+  ## return file names and paths
+  data.frame(.type, .keep_id, .spectra_path = .save_path, .spectra_name = .save_name, .spectra.ext = .save_ext)
+  }
+## ########################################################
+load_single_spectra <- function(.spectra_path, .spectra_name, .which,wavelengths,...){
+  ## a function to load a singe spectra from a file
+  spectra <- load_as(.file_path = .spectra_path, .name =.spectra_name)[.which,]
+  data.frame(value = spectra, wavelengths)
+}
+
+@
+
+<<organize-wavelength-info, echo = F, cache = T, results = hide>>=
+## ##################################################### ##
+## set out some useful variables and indicies            ##
+## to do with the wavelengths present in the spectra     ##
+## ##################################################### ##
+##
+## some useful values
+wavelengths <- 350:2500
+##
+## use 500 and 2451 as cut-offs  
+keep_lengths <- (wavelengths >= 500) & (wavelengths <= 2451)
+##
+## a set that is dyadic
+keep_dyadic <-  (wavelengths >= 404) & (wavelengths <= 2451)
+##
+## some indices for subsetting every tenth waveband
+every_10 <- seq(1, 2151, by = 10)
+keep_10  <- wavelengths %in% seq(400, 2450, by = 10)
+##
+##  place in a list for future use
+keep_list <- list(keep = list(.keep = keep_lengths), 
+                  dyadic = list(.keep = keep_dyadic), 
+                  sub_10 = list(.keep = keep_10))
+##
+## ########################################################
+@
+
+
+
+<<readin-spectra, echo=F, results=hide, cache = T, dependson=functions-readin;readin-soildata; organize-wavelength-info>>=
+## ########################################################
+##                                                       ##   
+## read in the spectral information from ascii files     ##
+##                                                       ##
+## ########################################################
+##
+## read in all reflectance spectra spectra
+##
+## create the  argument list
+read_spectra_input <- list(reflect =list(.file_path = 'c:/Research/Spectra/asciiSpectra', .type = 'reflect'),             abs = list(.file_path = 'c:/Research/Spectra/asc1_R', .type = 'abs'))
+##
+## use this list to read in the spectra
+raw_spectra_files <- ldply(read_spectra_input, .fun = splat(read_save_spectra), .save_path = raw_spectra_directory,.ext = '.txt', .column = 2, header = T, .save_id = 'all', .id = soil_data$vnir_name)
+##
+## ########################################################
+@
+
+<<organize-spectra-trim, echo = F, results = hide, cache = T, dependson = functions-readin;readin-spectra;organize-wavelength-info>>=
+## ########################################################
+##                                                       ##   
+## Subset spectra using pre-defined sets of wavelengths  ##
+##                                                       ##
+## ########################################################
+##
+## create argument lists
+trim_spectra_input  <-  alply(join(expand.grid(.type = c('reflect','abs'), 
+  .keep_id = c('dyadic','keep','sub_10')),raw_spectra_files),1, combine_list,
+  .id.var = '.keep_id', .y = keep_list, .which_y = '.keep', 
+  .which_x =  c(names(raw_spectra_files), '.keep_id'))
+##
+## using this argument list, trim the spectra
+trimmed_spectra_files <- ldply(trim_spectra_input, .fun = splat(trim_spectra), .save_path = raw_spectra_directory,.ext = '.txt', .column = 2, header = T)
+##
+## clean up
+invisible(gc())
+##
+## ######################################################## 
+@
+
+<<functions-sg-filter, cache = T, results = hide, echo = F., dependson = functions-basic>>=
+## ########################################################
+##                                                       ##   
+## functions for sativsky-golay filtering                ##
+##                                                       ##
+## ########################################################
+filter_sg <- function(.spectra_path, .spectra_name, .spectra_ext, .save_path, n, p, m, .type, ...){
+  ## a function to read a set ot spectra from a file
+  ## and apply the s-g filter with
+  ## parameters n, p, m (see help(sgolafilt))
+  ##
+  ## read in spectra
+  spectra <- load_as(.name = .spectra_name, .file_path = .spectra_path, .ext = .spectra_ext)
+  ##
+  ## run filter
+  sg   <- aaply(spectra, 1, sgolayfilt, n = n, p = p, m = m)
+  ##
+  ## arrange appropriately if a single sample
+  if(nrow(spectra) == 1){sg <- matrix(sg, dim(spectra))}
+  ##
+  ## name file
+  name_sg <- paste(.spectra_name,'_SGD', m, sep='')
+  ##
+  ## save
+  save_as(.object = sg,  .name = name_sg, .file_path = .save_path, .ext = .spectra_ext)
+  ##
+  ## return data frame of file name and locations
+  data.frame(.type, .filter = paste('SGD',m,sep=''), .spectra_name = name_sg, .spectra_path = .save_path, .spectra_ext)
+  }
+## ########################################################
+@
+
+<<organize-sg-filter, cache = T, echo =F, results = hide, dependson = functions-sg-filter; readin-spectra;organize-spectra-trim >>=
+## ########################################################
+##                                                       ##   
+## Filter the spectra using sativsky-golay filters       ##
+## with smoothing, and 1st derivative                    ##
+##                                                       ##
+## ########################################################
+##
+## organize arguments
+filter_sg_input <-  join(raw_spectra_files, expand.grid(.type = c('reflect','abs'), m  = 0:1))
+##
+## fit s-g filter to relfectance and absorbance usng
+## the above arguments
+filter_sg_files <- adply( filter_sg_input, 1, splat(filter_sg), n = 11, p = 2, .save_path = processed_spectra_directory)
+##
+## ########################################################
+##                                                       
+## s-g filter for the  every-10th wavelength subset spectra
+##
+## create argument list
+filter_sg_sub10_input <- join(subset(trimmed_spectra_files,.keep_id=='sub_10'),  expand.grid(.keep_id='sub_10', m  = 0:1)) 
+##
+## fit s-g filter to relfectance and absorbance usng
+## the above arguments
+filter_sg_sub10_files <- adply(filter_sg_sub10_input, 1, splat(filter_sg), n = 3, p = 2, .save_path = processed_spectra_directory)
+##
+## ########################################################
+@
+
+
+
+\subsection{Soil Colour}
+Soil colour was obtained by averaging the appropriate regions of each spectrum. Red $[600-690]$, green $[520-600]$ and blue $[450-520]$. These {\sc rgb} values were converted to munsell colours using the {\sf munsell} package in {\sf R}. 
+Figure \ref{fig:munsellColour} shows the Munsell colours present within the dataset.
+
+<<functions-soil-colour, cache = T, results = hide, warning = F, fig.keep = none, dependson = functions-basic>>=
+## ########################################################
+##                                                       ##   
+## functions for obtaining colour  from spectra          ##
+##                                                       ##
+## ########################################################
+## ########################################################
+in_interval <- function(.all,.interval,...){
+  ## index for an interval
+  ## a function to subset a particular waveband interval
+ .in_interval = .all %in% .interval
+}
+## ########################################################
+mean_interval <- function(.data, .index){
+  ## returns the mean for  given indices
+  mean(.data[.index])
+}
+## ########################################################
+spectra_to_RGB <- function(spectra, all_wavelengths, 
+   rgb_list = list(blue = list(.interval = 450:520), red = list(.interval =600:690), green = list(.interval =520:600)), ...) {
+  ## a function to return the average values in the 
+  ## red, green and blue sections of the spectrum
+  ## would work on any intervals
+  ##
+  ## get the appropriate indices
+  interval_list <-llply(rgb_list,splat(in_interval), .all =all_wavelengths)
+  ##
+  ## get the average in these subsets
+  rgb_values <- lapply(interval_list, mean_interval, .data =spectra)
+  ##
+  ## convert to colour
+  colour <- with(rgb_values,rgb(red, green, blue))
+  ##
+  ## return data frame
+  with(rgb_values,data.frame(red, green, blue, colour))
+  }
+## ########################################################
+soil_colour_spectra <- function(.spectra_name, .spectra_path, .spectra_ext, wavelengths,...){
+  ## this function loads spectra from a file
+  ## and returns the rgb colour and munsell colour
+  ##
+  ## read spectra
+  spectra <-  load_as(.name = .spectra_name, .file_path = .spectra_path, .ext = .spectra_ext)
+  ##
+  ## find r,g,b colour
+  rgb_colours <- adply(spectra, 1, spectra_to_RGB, all_wavelengths = wavelengths)
+  ##
+  ## get munsell colour
+  munsell_colours <- splat(function(red,green,blue,...){rgb2mnsl(R=red,G=green,B=blue)})(rgb_colours)
+  ##
+  ## return 
+  data.frame(rgb_colours, munsell = munsell_colours)
+  }
+## ########################################################
+@
+
+
+<<analysis-soilColour,echo=F, cache = T, results=hide, background = 1;1;1,warning=F, fig.keep=none; dependson = functions-soil-colour; readin-spectra>>=
+## ########################################################
+##                                                       ##
+## analyze the soil colour for the reflectance spectra   ##
+##                                                       ##
+## ########################################################
+##
+## calculate the RGB + munsell colours 
+soil_colour <- splat(soil_colour_spectra)(raw_spectra_files[1,],wavelengths = wavelengths)
+##
+## save
+save_as(soil_colour, .file_path = saved_data_directory, .name= 'soil_colour')
+##
+## clean up
+rm(soil_colour)
+invisible(gc())
+##
+## ########################################################
+@
+
+<<analysis-treemap-munsell,echo = F, cache = T, results=hide, dependson = analysis-soilColour>>=
+## ########################################################
+##                                                       ##
+## create a tree map of the munsell colours              ##
+##                                                       ##
+## ########################################################
+##
+## load the data 
+soil_colour <- load_as(.file_path = saved_data_directory, .name= 'soil_colour')
+##
+## summarize by colour
+munsell_summary <- table_to_data.frame(soil_colour$munsell,.name='munsell')
+##  
+## create a tree map plot
+tree_munsell <- data.frame(tmPlot(munsell_summary,'munsell', vSize = 'count',sortID = '-size',saveTm=T)[[1]][[1]],                          count = munsellDF$count)
+##
+## convert to hex colour for plotting
+tree_munsell$hex_colour <- mnsl2hex(tree_munsell$ind)
+## and create labels for plotting
+tree_munsell$name_count <- ddply(tree_munsell,1,function(x){paste(x$ind,x$count,sep= '  \n ')})$V1
+##
+## clean  up
+rm(list = c('munsell_summary','soil_colour'))
+invisible(gc())
+## ########################################################
+@
+\begin{figure}[tbp]
+\centering
+<<figure-treemap-munsell,  fig=T, dev=tikz,echo=F, out.width = 0.8\textwidth, fig.width = 7,fig.height=4.3268,cache=T, background = 1;1;1; dependson = analysis-treemap-munsell>>=
+## ########################################################
+## plot the tree map using ggplot2                       ##
+## ########################################################
+##
+ggplot(tree_munsell, aes(xmin = x0,ymin = y0, ymax = y0 + h, xmax = x0 + w)) + 
+  geom_rect(aes(fill = hex_colour,colour=hex_colour )) + 
+  scale_fill_identity()+
+  scale_colour_identity()+
+  geom_text(aes(x=x0+ w/2,y=y0+h/2,label = name_count, size=count))+
+  opts(axis.text.x = theme_blank(), axis.text.y = theme_blank(), axis.ticks = theme_blank(), 
+    axis.title.y = theme_blank(), axis.title.x = theme_blank(), panel.background = theme_blank(), 
+   legend.position = 'none') +
+  scale_size(to = c(1,7))+
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0))
+## ########################################################
+@
+\caption{Treemap showing the relative proportions of the munsell colours derived from spectroscopic measurements of soil colour for each sample profiles }\label{fig:munsellColour}
+\end{figure}
+
+
+\section{Initial predictive models for soil attributes using vis-NIR spectra}
+\subsubsection{Partial least squares regression}
+The first approach attempted for the predictive models was Partial least squares (PLS) regression on the first derivative of the S-G filtered data which had been sampled at every 10th wavelength.
+The results for the various PLS models are showin in figures~\ref{fig:rmsePls} (RMSE) \&~\ref{fig:r2Pls} ($R^2$).
+
+<<functions-sampling-rate, cache = T, echo = F, results = hide, warning = F, dependson = functions-basic>>=
+## ########################################################
+## functions for sampling                                ##
+## basic sampling at a prescribed rate                   ##
+## ########################################################
+
+training_info_rate <- function(value, variable, .id_column, .rate, .save_path, ...){
+  ## a function to create basic sampling by rate
+  ##
+  ## get the column which includes the row identifiers
+  other_args <- list(...)
+  id_samples <- other_args[[.id_column]]
+  ##
+  ## how many samples in the training data?
+  n_samples <- floor(.rate * length(value))
+  ##
+  ## which samples are in the training data
+  sample_rows <- sample.int(length(value), size = n_samples)
+  ## 
+  ## which ids are these?
+  id_training <- id_samples[sample_rows]
+  ##
+  ## which ids in the validation data
+  id_validation <- id_samples[-sample_rows]
+  ##
+  ## training and sampling row ids
+  rows_training <- sample_rows
+  rows_validation <- (1:length(value))[-sample_rows]
+  ##
+  ## get the data values in the training, validation
+  ## and all data (no NAs!)
+  data_training <- value[sample_rows]
+  data_validation <- value[-sample_rows]
+  data_all <- value
+  ## 
+  ## place in a named list
+  training_info <- llist(id_training, id_validation, data_training, data_validation, data_all,id_samples,rows_training, rows_validation)
+  ##
+  ## name and save
+  .property <- unique(as.character(variable))
+  obj_name <- paste(.property,'rate','training_info',sep='_')
+  save_as(.object = training_info, .file_path = .save_path, .name= obj_name)
+  ##
+  ## make sure the property id is there
+  training_info$variable <- .property
+  ##
+  ## return
+  return(training_info)
+ }
+## ########################################################
+@
+
+<<functions-models-general, cache = T, echo = F, results = hide, warning = F, dependson = functions-basic>>=
+## ########################################################
+## functions for modelling in general                    ##
+## including summarizing with MAE and RMSE               ##
+## ########################################################
+model_summary <- function(.which,observed,predicted){
+     ## returns MAE and RMSE for a subset of data
+     modelResid <- (observed-predicted)[.which]
+     data.frame(MAE = mean(abs(modelResid)), RMSE = sqrt(mean(modelResid^2)))
+  }
+## ########################################################
+@
+
+
+
+<<functions-models-plsr, cache = T, echo = F, results = hide, warning = F, dependson = functions-basic, functions-models-general>>=
+## ########################################################
+## functions for modelling  with plsr                    ##
+## including summarizing with MAE and RMSE               ##
+## ########################################################
+fit_pls <- function(id_training, id_validation, data_training, data_validation, data_all,id_samples,rows_training, rows_validation, variable, 
+  .spectra_name, .spectra_path, .save_path,.type, .filter,.keep, .sampling, ...){
+  ##  
+  ## load spectra
+  spectra <- load_as(.file_path = .spectra_path, .name = .spectra_name)[id_samples, .keep]
+  ##
+  ## organize data
+  pls_data <- data.frame(.var = data_all, spectra = I(as.matrix(spectra)))
+  ##
+  ## rename
+  names(pls_data)[1] <- as.character(variable)
+  ##
+  ## training data
+  pls_training <- data.frame(.var = data_training, spectra = I(as.matrix( spectra[rows_training,])))
+  ##
+  ## rename
+  names(pls_training)[1] <- as.character(variable)
+  ##
+  ## fit model
+  pls_model <- plsr(as.formula(paste(as.character(variable), '~', 'spectra', sep = ' ')), data = pls_training)
+  ##
+  ##  save model
+  model_name <- paste(as.character(variable),'PLS',.type,.filter,.sampling,sep ='_')
+  save_as(.object =pls_model, .file_path = .save_path, .name = model_name)
+  ##
+  ## predict at all data
+  all_predict <- predict(pls_model, newdata = pls_data)[,1,]
+  ##
+  ## summarize results
+  summary_results <- adply(all_predict,2, function(x){
+  ldply(list(training = rows_training, validation = rows_validation), 
+    model_summary, observed = data_all, predicted = x)
+  })
+  names(summary_results)[2] <- 'dataset'
+  ##
+  ## save summary
+  summary_name <- paste(as.character(variable),'PLS_summary',.type,.filter,.sampling,sep ='_')
+  save_as(.object =summary_results, .file_path = .save_path, .name = summary_name)
+  ##
+  ## return summary_results
+  data.frame(summary_results, .type, .sampling, .filter, variable = as.character(variable))
+  ##
+  }
+## ########################################################
+@
+
+<<organize-models-create-directories, echo = F, cache = T, results = hide,dependson = organize-create-directories>>=
+## ########################################################
+## creae the directories to save the models and results  ##
+## ########################################################
+## create directories for training information
+training_info_directory <- file.path(saved_data_directory,'training_info')
+dir.create(training_info_directory)
+##
+## for the models
+models_directory <- file.path(saved_data_directory,'models')
+dir.create(models_directory)
+##
+## for pls
+pls_models_directory <- file.path(models_directory,'plsr')
+dir.create(pls_models_directory)
+##
+## for cubist
+cubist_models_directory <-  file.path(models_directory,'cubist')
+dir.create(cubist_models_directory)
+##
+## ########################################################
+@
+
+<<organize-sampling-rate, echo = F ,results = hide, cache = T, dependson = organize-models-create-directories; functions-sampling-rate>>=
+## ########################################################
+## create training and validation datasets using         ##
+## basic sampling at a prescribed rate                   ##
+## ########################################################
+##
+## load the required molten data 
+ load(file.path(saved_data_directory,'molten_soil_variables.RData'))
+##
+## create the training information and dataset
+rate_training_info_list <- dlply(molten_soil_variables, .(variable), 
+  splat(training_info_rate), .save_path =training_info_directory, 
+  .id_column = '.row_index',.rate = 0.7) 
+##
+## save this training information list for future use
+save(rate_training_info_list, file = file.path(training_info_directory,paste('rate_training_info_list.RData')))
+##
+## clean-up
+rm(list = c('rate_training_info_list','molten_soil_variables.RData' ))
+invisible(gc())
+## ########################################################
+@
+
+
+
+
+<<analysis-PLSR-basic-fit, echo=F, results=hide, warning =F, cache = T; dependson = readin-soildata; functions-basic, functions-plsr; readin-spectra>>=
+## ########################################################
+## fit the pls models to the rate-sampled datasets       ##
+## for each soil property  using SGD1 filtered spectra   ##
+## sampled at every 10th wave length                     ##
+## including summarizing with MAE and RMSE               ##
+## ########################################################
+##
+## load training info
+training_info_list <- load_as(.file_path = training_info_directory, .name = 'rate_training_info_list')
+##
+## create the  argument list using SGD1 filtered soils
+pls_model_arguments <- c(llply(training_info_list, function(x,y){c(x,as.list(y))},
+  y = filter_sg_sub10_files[2,]), llply(training_info_list, function(x,y){c(x,as.list(y))},
+  y = filter_sg_sub10_files[4,]))
+##
+## fit model to reflectance and fit models to absorbance and reflectance
+pls_model_rate_summaries  <-  ldply(pls_model_arguments , splat(fit_pls),
+                  .keep = 1:206,  .save_path = pls_models_directory, .sampling = 'rate')
+##
+## save argument list
+save(pls_model_arguments, file = file.path(pls_models_directory, paste('pls_model_arguments.RData')))
+##
+## and model summaries
+save(pls_model_rate_summaries, file = file.path(pls_models_directory, paste('pls_model_rate_summaries.RData')))
+##
+## clean up
+rm(list = c('pls_model_rate_summaries','training_info_list','pls_model_arguments'))
+invisible(gc())
+## ########################################################
+@
+
+
+\begin{figure}[tbp]
+\centering
+<<figure-PLSR-rmse,  fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 7,fig.height=9,cache =T, background = 1;1;1, warning = F, dependson = setup-libraries;analysis-PLSR-basic-summary>>=
+## ########################################################
+## create a plot of the RMSE for the different           ##
+## models for each soil property                         ##
+## ########################################################
+##
+## load  required data 
+load(file.path(pls_models_directory,paste('pls_model_rate_summaries.RData')))
+##
+## a bit of fixing to allow nice plotting with tikz / latex
+## 
+## the soil property names
+pls_model_rate_summaries$latex_id <- with(pls_model_rate_summaries, properties_to_latex(variable))
+##
+## make the number of pls components numeric
+pls_model_rate_summaries$components <- laply((str_split(pls_model_rate_summaries$X1,pattern = ' ')), function(.x){as.numeric(.x[1])})
+##
+## create the plot
+theme_set(theme_bw())
+ggplot(pls_model_rate_summaries, aes(x = components, y = RMSE)) + 
+    facet_wrap(~latex_id,ncol=2,scales ='free_y') +
+    geom_line(aes(colour= .type:factor(dataset))) +
+    opts(strip.background = theme_blank()) +
+    scale_colour_manual(values = c("red","blue",'green','orange')) +
+    ylab('RMSE')
+##
+## clean up
+rm(list = c('pls_model_rate_summaries'))
+invisible(gc())
+## ########################################################
+@
+\caption{Root-mean-square error from PLSR models for training and validation data sets for the various soil properties}\label{fig:rmsePls}
+\end{figure}
+
+
+
+
+\subsubsection{Cubist}
+A second approach was to use  the Cubist algorithm \citep{Kuhn2011}, which builds parsimonious regression trees using the variables with linear regression models at each node. 
+Here, we implemented the algorithm with 5 committees. The RMSE for the training and test datasets are in table~\ref{table:cubistRMSE}. As with the PLS models, these were computed using every tenth wavelength and the first derivative of the S-G filtered spectra.
+
+<<functions-models-cubist-basic, cache = T, echo = F, results = hide, depends = functions-basic; functions-models-general>>=
+## ########################################################
+## functions for fitting cubist models                   ##
+## and summarizing!                                      ##
+## ########################################################
+fit_cubist <- function(id_training, id_validation, data_training, data_validation, 
+  data_all, id_samples, rows_training, rows_validation, variable, .spectra_name, .spectra_path,
+  .save_path,.type, .filter,.keep, .sampling, .coef_names,.cubist_control = cubistControl(), .committees, ...){
+  ## a function that fits a cubist model for a variable and spectra data  
+  ##
+  ## load spectra
+  spectra <- load_as(.file_path = .spectra_path, .name = .spectra_name)[id_samples, .keep]
+  ##
+  ## get training data -- y
+  cubist_y <- data_training
+  ##
+  ## get training data  -- x
+  cubist_x <- data.frame(spectra[rows_training,])
+  ##
+  ## give names that make sense
+  names(cubist_x) <- .coef_names
+  ##
+  ## fit model
+  cubist_model <- cubist(y = cubist_y, x = cubist_x, control = .cubist_control, committes = .committees)
+  ##
+  ## name and save the  model
+  model_name <- paste(as.character(variable),'cubist',.type,.filter,.sampling, sep ='_')
+  save_as(.object =cubist_model, .file_path = .save_path, .name = model_name)
+  ##
+  ## ######################################################
+  ##
+  ## model summaries
+  ##
+  ## create newdata object for predictions
+  cubist_x_all <- data.frame(spectra)
+  names(cubist_x_all) <- .coef_names
+  ##
+  ## predict at all data locations
+  predict_all <- predict(cubist_model, newdata = cubist_x_all)
+  ##
+  ## get model statistics
+  summary_results <- ldply(list(training = rows_training, validation = rows_validation), .fun = model_summary, observed = data_all, predicted = predict_all)
+  names(summary_results)[1] <- 'dataset'
+  ##
+  ## return summary_results
+  data.frame(summary_results, .type, .sampling, .filter, variable = as.character(variable))
+  ##
+  }
+## ########################################################
+@
+
+
+<<analysis-cubist-basic-fit, echo=F, results=hide, warning =F, cache = T; dependson = functions-models-cubist-basic; organize-sampling-rate>>=  
+## ########################################################
+## fit models using cubist                               ##
+## basic rate sampling                                   ##
+## to all soil properties                                ##
+## using SG filtered-D1 reflectance and absorbance       ##
+## ########################################################
+##
+## load training info
+training_info_list <- load_as(.file_path = training_info_directory, .name = 'rate_training_info_list')
+##
+## create names for coefficients
+coef_names <-paste('w', seq(400, 2450, by = 10), sep = '') 
+##
+## create argument lists for fitting cubist models to 
+## SG filtered-D1 reflectance and absorbance
+cubist_basic_arguments <- c(llply(training_info_list, function(x,y){c(x,as.list(y))},
+  y = filter_sg_sub10_files[2,]), llply(training_info_list, function(x,y){c(x,as.list(y))},
+  y = filter_sg_sub10_files[4,]))
+##
+# fit the models and get summaries 
+basic_cubist_summaries <-  ldply(cubist_basic_arguments,.fun = splat(fit_cubist), .coef_names = coef_names, .keep = 1:206, .save_path = cubist_models_directory, .committees = 5, .sampling = 'rate')
+##
+## save
+save(cubist_basic_arguments, file = file.path(cubist_models_directory, 'cubist_basic_arguments.RData' ))
+save(basic_cubist_summaries, file = file.path(cubist_models_directory, 'basic_cubist_summaries.RData' ))
+##
+## clean-up
+rm(list = c('cubist_basic_arguments','basic_cubist_summaries'))
+invisible(gc())
+##
+## ########################################################
+@
+
+
+\begin{table}[tbp]
+\caption{RMSE for validation and training data sets using cubist.}
+\label{table:cubistRMSE}
+\centering
+<<table-cubist-basic-summary, echo = F, results =tex, cache = T, dependson = analysis-cubist-basic-summary>>=
+## ########################################################
+## create a table summarizing the cubist fits            ##
+## ########################################################
+##
+## load data
+cubist_basic_summary <- load_as(.file_path = cubist_models_directory, .name = 'basic_cubist_summaries')
+##
+## reformulate results table
+basic_cubist_table <- cast(reshape2:::melt.data.frame(cubist_basic_summary, measure.var = 'RMSE', variable.name = 'statistic', id.var = c('.type', 'dataset', 'variable')), variable  ~.type +dataset)
+##
+## set row names for xtable / latex
+row.names(basic_cubist_table) <- properties_to_latex(basic_cubist_table$variable)
+##
+## create nicer looking column names
+names(basic_cubist_table)[-1] <-laply(str_split(names(basic_cubist_table)[2:5], pattern = '_'), function(x){paste(x[1], ' (', x[2],')',sep='')})
+##
+## latexify table using xtable
+basic_cubist_xtable <- xtable(basic_cubist_table[,-1], digits=3)
+##
+## and print this  using booktabs format
+booktabs.xtable(basic_cubist_xtable)
+##
+## clean up
+rm(list = c('basic_cubist_summary', 'basic_cubist_table','basic_cubist_xtable'))
+invisible(gc())
+## ########################################################
+@
+\end{table}
+
+\subsubsection{Overview of initial models}
+From figure~\ref{fig:rmsePls}  and table~\ref{table:cubistRMSE}, the Cubist models appear to be generally more robust than the PLS regression, especially to prediction on the validation data set. Models using the absorbtion tend to perform better than the reflectance on the training data sets, but not on the validation data sets.
+
+In later sections we consider using continuum-removed spectra and wavelet decomposition in developing the predictive models. We will also consider various sampling techniques and outlier detection and removal.
+
+
+\section{Clay mineralogy}
+Following the work of \citet{ViscarraRossel2009} and \citet{ViscarraRossel2011}, we consider calculating the relative abunance of the clay minerals smectite, illite and kaolinite. 
+This procedure involves calculating the continuum-removed spectra for various ranges of wavelengths $[2130 - 2260], [2260-2410]$ and $[1830 - 2130]$. 
+In this case, contiuum removal process was to calculate deviations from the convex hull \citep{Clark1984}.
+
+
+<<functions-mineralogy, cache = T, echo = F, results = hide, dependson = functions-soil-colour>>=
+## ########################################################
+## some functions for analysing mineralogy from spectra  ##
+## ########################################################
+add_interval_info <- function( .id, .from, ...){
+  ## defunct function for grabbing interval information
+  ## convert the data frame row to a list
+  .list <- as.list(...)
+  ## get the appropropriate info
+  .list$.interval = .from[[.id]]$.interval
+  .list$.id. <- .id
+  .list
+  }
+## ########################################################
+rename_in <- function(.list, .old, .new,...){
+  ## defunct function for renaming in a list
+  names_list <- names(.list)
+  which_change <- which(names_list %in% .old)
+  names_list[which_change] <- .new
+  names(.list) <- names_list
+  .list
+  }
+## ########################################################  
+read_USGS <- function(.spectra_fname){
+   ## a function to read in a spectra downloaded from USGS
+  .data <- read.table(file = .spectra_fname, skip=17, na.strings = '-1.23e34', 
+                      col.names = c('wavelength', 'reflectance','sd'))
+  .data[,1] <- .data[,1] * 1000
+  .data
+  }
+## ########################################################
+read_reference_spectra <- function(.spectra_fname, .all, mineral, .save_path, .type,  ...){
+  ## a function to read in and smooth reference spectra 
+  ## from USGS
+  ##
+  ## read in spectra
+  usgs_spectra <- readUSGS(as.character(.spectra_fname))
+  ##
+  ## smooth to all wavebands (usually 1-nm 350:2500)
+  spline_smooth <- spline(usgs_spectra[,1:2], xout = .all)
+  ##
+  ## make a matrix with 1 row
+  spectra <- matrix(spline_smooth$y,nrow = 1)
+  ##
+  ## name and save
+  reference_name <- paste(mineral,'reference',.type,sep='_')
+  save_as(.object = spectra, .file_path = .save_path, .name = reference_name)
+  ##
+  ## return file name and location
+  data.frame(.spectra_path = .save_path, .spectra_name = reference_name, mineral, .type)
+  ##
+  }
+## ########################################################
+@
+
+<<organize-mineralogy-clay, echo = F, cache = T, results = hide, dependson = organize-wavelength-info; functions-mineralogy>>=
+## ########################################################
+## set the mineralogical infomation used in              ##
+## analysing the spectra for different clay minerals     ##
+## ########################################################
+##
+## organize the data for mineralogical analysis
+clay_minerals_list <- list(smectite = list(.interval = 1830:2130, mineral = 'smectite', .diagnostic = 1912),                            kaolinite = list(.interval = 2131:2260, mineral = 'kaolinite', .diagnostic = 2165), illite = list( .interval = 2261:2410, mineral = 'illite', .diagnostic = 2345)) 
+## ########################################################
+@
+
+<<readin-clay-reference-spectra, cache = T, echo = F, results = hide, dependson = continuum-removal; functions-mineralogy>>=
+## ########################################################
+## read in the reference spectra for clay minerals       ##
+## from USGS spectra                                     ##
+## process using s-g filter                              ##
+## ########################################################
+## 
+## set the filenames of reference spectra
+clay_reference_list <- list(smectite = list( .spectra_fname = 'montmorillonite_sca2.14557.asc', mineral = 'smectite',       .type = 'reflect'), kaolinite = list(.spectra_fname = 'kaolinite_cm9.11962.asc', mineral = 'kaolinite', .type= 'reflect'),   illite = list(.spectra_fname = 'illite_imt1.10982.asc', mineral = 'illite', .type = 'reflect'))
+##
+## read in spectra and save
+clay_reference <- ldply(clay_reference_list, splat(read_reference_spectra), .all = wavelengths,                       .save_path = raw_spectra_directory)
+##
+## process with sg-filter
+clay_reference_sg <- ddply(clay_reference, .(mineral), splat(filter_sg), n = 11, p = 2, m = 0,                           .save_path =  processed_spectra_directory, .spectra_ext = '.RData')
+##
+## ########################################################
+@
+
+<<functions-filter-continuum-removal, cache = T, echo = F, results = hide, dependson = functions-basic; functions-mineralogy>>=
+## ########################################################
+## some functions for filtering using                    ##
+## deviations from the convex hull                       ##
+## also known as continuum removal                       ##
+## ########################################################
+c_hull_deviation <- function(.spectra, .all = 350:2500, .interval = 350:2500, .return_hull = F,...){
+  ## a function to perform deviations from the convex hull
+  ## at the moment only tested on reflectance values
+  ## not absorbance
+  ##
+  ## organize data
+  ##
+  ## get the interval
+  .in_interval <- in_interval(.all = .all, .interval = .interval)
+  ##
+  ## sort the data
+  .data <- sortedXyData(.all[.in_interval], .spectra[.in_interval])
+  ##
+  ## calculate convex rull
+  c_hull <- chull(.spectra[.in_interval])
+  ##
+  ## get the approprite region
+  c_hull <- c_hull[which(c_hull == 1):length(c_hull)]
+  ##
+  ## calculate linear approximation between hull points
+  linear_approx <- approx(.data[c_hull,], xout = .interval, method = 'linear', ties = 'mean')
+  ##
+  ## calculate the deviation from the convex hull
+  deviation <-  ( linear_approx[[2]] - .spectra[.in_interval] )/linear_approx[[2]]
+  ##
+  ## add the hull if you wish
+  if(.return_hull == T){attr(deviation, 'hull') <-linearApprox[[2]]}
+  ##
+  ## return
+  return(deviation)
+  ##
+  }
+## ########################################################
+filter_continuum_removal <- function(.spectra_path, .spectra_name, .interval, mineral = 'all', 
+      .all, .return_hull = F,.save_path,.type, .filter, ...){
+  ## a function to perform continuum removal on reflectance
+  ## first loading in the spectra
+  ##
+  ## load spectra
+  spectra <- load_as(.file_path = .spectra_path, .name = .spectra_name)
+  ##
+  ## calculate deviations from the convex hull for each .row
+  ## use aaply to avoid having to transpose the outcome
+  spectra_cr <- aaply(spectra, 1, c_hull_deviation, .interval = .interval, .all = .all, .return_hull = F)
+  ##
+  ## rename and save
+  .new_filter <- paste(.filter, 'cr', sep='_')
+  processed_spectra_name <- paste(.spectra_name,'cr',mineral, sep='_')
+  save_as(.object = spectra_cr, .name = processed_spectra_name, .file_path = .save_path)
+  ##
+  ## return  data frame of file locations and object names
+  data.frame(.filter = .new_filter, .spectra_path = .save_path, .spectra_name = processed_spectra_name,  .type, mineral )
+  ##
+  }
+## ########################################################
+spectral_quantiles <- function(.spectra_path, .spectra_name, .filter, ., probs, .interval, .save_path, .type,mineral = 'all', ...){
+  ## a function to get quantiles of the spectra for
+  ## a given interval (mineral)
+  ##
+  ## load spectra
+  spectra <- load_as(.file_path = .spectra_path, .name = .spectra_name)
+  ##
+  ## calculate some quantiles
+  .quantiles <- adply( spectra, 2, quantile, prob = probs)
+  ##
+  ## rename the variable 
+  names(.quantiles)[1] <- 'wavelength';
+  ##
+  ## and give the correct wavelength IDs
+  .quantiles$wavelength = .interval
+  ##
+  ## melt
+  molten_quantiles <- melt(.quantiles, id.var = 'wavelength')
+  ##
+  ## reassign levels
+  levels(molten_quantiles$variable) <- probs
+  ##
+  ## rename and save
+  quantile_name <- paste(.type,.filter,mineral,'quantiles',sep='_')  
+  save_as(.object = molten_quantiles, .file_path = .save_path, .name = quantile_name)
+  ##
+  ## return the molten quantiles
+  data.frame(molten_quantiles)
+  ##
+  }
+## ########################################################
+@
+
+<<analysis-mineralogy-clay-continuum-removal, echo=F, cache = T, results= hide; dependson = organize-mineralogy-clay; functions-filter-continuum-removal>>=
+## ########################################################
+## continuum removal on  particular waveband intervals   ##
+## corresponding to different clay minerals              ##
+## ########################################################
+##
+## organize the filter arguments as a list   
+filter_cr_clay_arguments <- llply(clay_minerals_list, function(x,y){c(x,as.list(y))}, y = filter_sg_files[1,])   
+##
+## run the continuum removal
+clay_minerals_cr_files <-ldply(filter_cr_clay_arguments, splat(filter_continuum_removal), .save_path = processed_spectra_directory, .all = wavelengths)
+##
+## ########################################################
+## Continuum removal for reference spectra for the
+## clay minerals
+## #######################################################
+## 
+## organize the arguments as a list
+clay_reference_cr_list <-  alply( clay_reference_sg, 1, combine_list, .which_x = names(clay_reference_sg[,-1]), .y = clay_minerals_list, .which_y = names(clay_minerals_list[[1]]), .id.var = 'mineral')
+## 
+## run the continuum-removal 
+clay_reference_cr_files <-ldply(clay_reference_cr_list, splat(filter_continuum_removal), .save_path = processed_spectra_directory, .all = wavelengths)
+##
+## #######################################################
+@
+
+<<organize-spectra-quantiles-clay, echo = F, cache = T, dependson = analysis-mineralogy-clay-continuum-removal>>=
+## ########################################################
+## create quantiles of the continuum-removed spectra     ##
+## for plotting against the reference spectra            ##
+## ########################################################
+##
+## organize the arguments
+clay_quantiles_cr_arguments <-  alply( clay_minerals_cr_files, 1, combine_list, .which_x = names(clay_reference_sg[,-1]), .y = clay_minerals_list, .which_y = names(clay_minerals_list[[1]]), .id.var = 'mineral')
+##
+## get the quantiles of the cr-spectra for the samples
+clay_cr_quantiles <- ldply(clay_quantiles_cr_arguments, splat(spectral_quantiles), probs =c(0.05,0.06, 0.5,0.84, 0.95),  .save_path = processed_spectra_directory)
+##
+## ########################################################
+## get the reference spectra in the same format   
+##
+## an argument list
+clay_reference_arguments <-  alply( clay_reference_cr_files, 1, combine_list, .which_x = names(clay_reference_sg[,-1]), .y = clay_minerals_list, .which_y = names(clay_minerals_list[[1]]), .id.var = 'mineral')
+##
+## and reading and organizing
+clay_reference_spectra <- ldply( clay_reference_arguments, splat (function(.spectra_path, .spectra_name, .interval, mineral, ...){ data.frame(value = load_as(.file_path = .spectra_path, .name = .spectra_name), wavelength = .interval,.mineral = mineral)}))
+##
+## ########################################################
+## and the diagnostic bands
+##
+## set up diagnostic bands as a data frame
+diagnostic_clay <- ldply(clay_minerals_list,splat(function(mineral,.diagnostic,...){data.frame(mineral, wavelength = .diagnostic)}))
+##
+## #######################################################   
+## save the results
+save_as(.object = clay_cr_quantiles, .file_path  = processed_spectra_directory, .name= 'clay_cr_quantiles')
+save_as(.object = clay_reference_spectra, .file_path  = processed_spectra_directory, .name= 'clay_reference_spectra')
+save_as(.object = diagnostic_clay, .file_path  = processed_spectra_directory, .name= 'diagnostic_clay')
+##
+## tidy up
+rm(list = c('clay_cr_quantiles', 'clay_reference_spectra', 'diagnostic_clay', 'clay_reference_arguments', 'clay_quantiles_cr_arguments' ))
+invisible(gc())
+##
+## ########################################################
+@
+
+\begin{figure}[tbp]
+\centering
+<<figure-spectra-quantiles-clay,  fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 6.5,fig.height=3.25,cache = T, background = 1;1;1, warning = F, dependson = setup-libraries;organize-spectra-quantiles-clay ,results=hide,message=F>>=
+## ########################################################
+## figure comparing the continuum removed spectra        ##
+## with the reference spectra                            ##
+## ########################################################
+##
+## load  the required data
+clay_mineral_quantiles <- load_as( .file_path  = processed_spectra_directory, .name= 'clay_cr_quantiles')
+clay_mineral_reference <- load_as( .file_path  = processed_spectra_directory, .name= 'clay_reference_spectra')
+clay_mineral_diagnostics <- load_as( .file_path  = processed_spectra_directory, .name= 'diagnostic_clay')
+## 
+## create the plot
+ggplot(clay_mineral_quantiles,aes(x = wavelength,y = 1-value)) + 
+  geom_line(aes(colour = variable)) + 
+  geom_line(data = clay_mineral_reference, colour = 'red') + 
+  facet_wrap(~ mineral ,nrow = 1, scales = 'free') +
+  geom_vline(data = clay_mineral_diagnostics, aes( xintercept = wavelength)) + 
+  geom_vline(data = clay_mineral_diagnostics, aes( xintercept = (wavelength - 15)), linetype = 2) +
+  geom_vline(data = clay_mineral_diagnostics, aes( xintercept = (wavelength + 15)), linetype = 2) +
+  ylab('Continuum-removed reflectance')+
+  xlab('Wavelength / nm') + 
+  scale_x_continuous(breaks = seq(1900, 2050, by=150)) +
+  scale_y_continuous( formatter = 'drop0trailing.format', expand= c(0.01,0)) +
+  scale_colour_brewer('Soil spectra \n (Quantiles)', palette = 'Greys') +
+  opts(legend.title = theme_text(  size = 12 * 0.8, hjust = 0, face = 'plain'), 
+       panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(), 
+       strip.background = theme_blank(),strip.text.x = theme_blank())
+##
+## add the a, b , c labels
+grid.text(x = 0.05, y = 0.97, label = '(a)')
+grid.text(x = 0.34, y = 0.97, label = '(b)')
+grid.text(x = 0.62, y = 0.97, label = '(c)')
+##
+## ########################################################
+## clean up
+rm(list = c('clay_mineral_diagnostics', 'clay_mineral_quantiles', 'clay_mineral_reference'))
+invisible(gc())
+##
+## ########################################################
+@
+\caption{Continuum-removed reflectance for diagnostic wavelengths of various clay minerals: (a) Illite, (b) Kaolinite, (c) Smectite. The red lines are the continuum-removed reflectance for each of the reference clay minerals while the vertical black lines are the diagnostic wavelengths used by \citet{ViscarraRossel2011}, with the dotted vertical lines indicating the 30-nm band where the local minimum will identify the feature.}\label{fig:claymineralogy}
+\end{figure}
+
+The relative abundances of smectite, kaolinite and illite were calculated by dividing the value at the diagnostic absorbtion band by the corresponding value of the reference mineral spectra. 
+ The reference spectra came from the USGS Digital Spectral Library \citep{Clark2007} using samples described in \citet{Clark1990}. 
+ Figure~\ref{fig:claymineralogy} shows that the diagnostic absorbtion bands may be not exactly as defined, instead we use the wavelength corresponding to the local minimum within a 30-nm band around the diagonstic band. 
+ 
+ Figures~\ref{fig:claymineralogy} \&~\ref{fig:diagnosticClay} show the absorbtion features clearly for smectite and illite, although the Iilite peak appears to be shifted to nearer 2350 in the legacy spectra. There is little evidence of the kaolinite feature in the sampled spectra.
+ Given these results. for Smectite we will compare the deviation from the continuum  from the sampled spectra at 1911 nm with the value from the reference spectra at 1909 nm while for Illite we will compare the value at 2350 nm (sampled) with that at 2346 nm for the reference spectra. 
+ For kaolinite, we will use the reference spectrum value at 2162 nm and compare it with the value at 2165 nm in the sample spectra.
+ 
+<<functions-mineralogy-abundance, echo = F, cache = T, results = hide>>=
+## ########################################################
+## some functions for identifying local minima and       ##
+## maxima as part of  mineral abundance calculations     ##
+## using spectra                                         ##
+## ########################################################
+to_band_range <- function(.variable_name, .width,...){
+  ##  function to go from a band range
+  ## to a wide band range
+  value <- as.numeric(list(...)[.variable_name])
+  .between <- value + c(-.width/2,.width/2)
+  }
+## ########################################################
+identify_local_minima <- function(value, wavelength, .between, ...){
+  ## a function for identify a local minmum between
+  ## two wave bands
+  ##
+  ## which wavelengths are are the wide band
+  .in_interval <- in_interval(.all = wavelength, .interval= .between[1]:.between[2])
+  ##
+  ## where is the mimnum values
+  diagnostic_id  <- which.min(1-value[.in_interval])
+  ##
+  ## what is the minimum value
+  minimum <- value[.in_interval][diagnostic_id]  
+  ##
+  ## what band is the mininum value at
+  diagnostic_band  <- wavelength[.in_interval][diagnostic_id]
+  ###
+  ## return a data frame
+  data.frame(diagnostic_band, diagnostic_id, minimum, in_range_min = min(.between), 
+            in_range_max = max(.between), using = 'local_minimum')  
+  ##
+  }
+## ########################################################
+identify_deriv_minima <- function(value, wavelength, .between, n= 11, p = 2,...){
+  ## a function for identify a local minmum between
+  ## two wave bands using derivatives
+  ##
+  ## which wavelengths are in the interval?
+  .in_interval <- in_interval(.all = wavelength, .interval= .between[1]:.between[2])
+  ##
+  ## get the derivative 
+  derivative <- sgolayfilt(value, n = n, p = p, m = 1)
+  ##
+  ## where is the derivative zeo
+  diagnostic_id <- which.max(cumsum(derivative[.in_interval] >0))
+  ##
+  ## to which wavelength does that correspond?
+  diagnostic_band <- wavelength[.in_interval][diagnostic_id]
+  ##
+  ## what is the minumum value
+  minimum <- value[.in_interval][diagnostic_id]
+  ##
+  ## return the information
+  data.frame(diagnostic_band, diagnostic_id, minimum, in_range_min = min(.between),
+              in_range_max = max(.between), using = 'deriv_1')
+  ##
+  }
+## ########################################################
+spectral_minima_multiple <- function(.spectra_path, .spectra_name, .type, .id,.between, .interval, n = 11, p = 2, ...){
+  ## a function to read in spectra from a file
+  ## and calculate the mininum value and
+  ## corresponding wavelenth using derivatives 
+  ## and local minima
+  ##
+  ## load spectra 
+  spectra <- load_as(.file_path = .spectra_path, .name = .spectra_name)
+  ##
+  ## find the minima using derivatives
+  results_deriv <- adply(spectra, 1, identify_deriv_minima, wavelength = .interval, .between = .between, n = n, p = p)
+  ##
+  ## find the minima using raw values
+  results_local <-adply(spectra, 1, identify_local_minima, wavelength = .interval, .between = .between)
+  ##
+  ## return the results
+  rbind(results_deriv,results_local)
+  ##
+  }
+## ########################################################
+relative_abundance <- function(minimum, reference_value, ...){
+  ## a function to calculate the relative abundance given
+  ## the minimum value and reference value
+  ##
+  minimum / reference_value
+  }
+## ########################################################
+normalized_difference <- function(A,B){
+  ## calculate normalize difference
+  ab <- cbind(A,B)
+  ret <- (A-B)/ (A+B)
+  ##look for NA (dividing by 0)
+  both0 <- apply(ab,1, function(x){(x[1] == 0)&(x[2]==0)})
+  ## set those to 0
+  ret[both0] <- rep(0, table(both0)[2])
+  ## return
+  ret
+  ##
+  }
+## ########################################################
+@
+ 
+<<analysis-mineralogy-clay-abundance, cache = T, echo = F, results = hide, dependson = functions-mineralogy-abundance; organize-spectra-quantiles-clay>>=
+## #########################################################
+## calculations for mineral abundance                     ##
+## clay minerals                                          ##
+## #########################################################
+##
+## load the required data
+clay_mineral_diagnostics <- load_as(.file_path  = processed_spectra_directory, .name = 'diagnostic_clay')
+clay_mineral_reference <- load_as(.file_path  = processed_spectra_directory, .name = 'clay_reference_spectra')
+##
+## create the extended band widths
+clay_diagnostic_wideband <- dlply(clay_mineral_diagnostics, .(mineral), splat(to_band_range), .width = 30, .variable_name = 'wavelength')
+##
+## create the the argument list for identifying the local mimimum within the band range for the reference spectra
+clay_reference_diagnostic_list <- dlply(clay_mineral_reference, .(.mineral), combine_list , 
+  .which_x = c('value','wavelength'), .y = clay_diagnostic_wideband, .which_y = '.between', .id.var = 'mineral')
+##
+## identify the location of the diagostic features and the value in the reference spectra
+clay_reference_diagnostic_results <- ldply(clay_reference_diagnostic_list, .fun = splat(identify_local_minima))
+##
+## ########################################################
+## now for the sample spectra
+##
+## create the argument list
+clay_spectra_diagnostic_list <- llply(dlply( join(clay_minerals_cr_files, clay_mineral_diagnostics), .(.id), combine_list,.which_x = c('.spectra_path', '.spectra_name','.id'), .y = clay_diagnostic_wideband, .which_y = '.between', .id.var = '.id'), combine_list, .which_x = c('.spectra_path', '.spectra_name', '.id','.between'),  .y = filter_cr_clay_arguments,   .which_y = '.interval',.id.var = '.id')                             
+##
+## identify using local minimum and derivatives
+clay_diagnostic_results <- ldply(clay_spectra_diagnostic_list, splat(spectral_minima_multiple))
+##
+## ########################################################
+## save 
+save_as(.object = clay_reference_diagnostic_results, .file_path = processed_spectra_directory, .name = 'clay_reference_diagnostic_results')
+save_as(.object = clay_diagnostic_wideband, .file_path = processed_spectra_directory, .name = 'clay_diagnostic_wideband')
+save_as(.object = clay_diagnostic_results, .file_path = processed_spectra_directory, .name = 'clay_diagnostic_results')
+##
+## clean up
+rm(list = c('clay_reference_diagnostic_results', 'clay_diagnostic_wideband', 'clay_diagnostic_results', 'spectra_diagnostic_list', 'reference_diagnostic_list'))
+invisible(gc())
+##
+## ########################################################
+@
+
+
+\begin{figure}[tbp]
+\centering
+<<figure-clay-mineralogy-diagnostic-bands,  fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 6.5, fig.height = 3.25, cache = T, background = 1;1;1, warning = F, dependson = setup-libraries;analysis-mineralogy-clay-abundance, results=hide, message=F>>=
+## ########################################################
+## a figure showing the location of diagnostic wavebands ##
+## for various clay minerals                             ##
+## ########################################################
+##
+## load required data 
+clay_mineral_diagnostics <- load_as(.file_path  = processed_spectra_directory, .name = 'diagnostic_clay')
+clay_diagnostic_results <- load_as(.file_path = processed_spectra_directory, .name = 'clay_diagnostic_results')
+clay_reference_diagnostic_results  <- load_as(.file_path = processed_spectra_directory, .name = 'clay_reference_diagnostic_results')
+##
+## create plot
+ggplot(clay_diagnostic_results, aes(x= diagnostic_band, colour = using))  +
+  geom_density() + 
+  facet_wrap(~.id, scales='free', ncol = 3)+
+  ylab('Density') + 
+  xlab('Wavelength') +
+   geom_vline(data = clay_mineral_diagnostics ,aes( xintercept = wavelength), colour ='red') +
+   geom_vline(data = clay_reference_diagnostic_results ,aes( xintercept = diagnostic_band), colour ='blue') +
+   scale_colour_manual('Method', breaks = c('deriv_1','local_minimum'), labels = c('Derivative','Local minimum'), values = c('black','darkgrey'))+
+   opts(legend.title = theme_text(  size = 12 * 0.8, hjust = 0, face = 'plain'), panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(), strip.background = theme_blank(),strip.text.x = theme_blank())
+##
+## add the a, b , c labels
+grid.text(x = 0.05, y = 0.97, label = '(a)')
+grid.text(x = 0.32, y = 0.97, label = '(b)')
+grid.text(x = 0.59, y = 0.97, label = '(c)')
+##
+## tidy up
+rm( list = c('clay_mineral_diagnostics', 'clay_diagnostic_results', 'clay_reference_diagnostic_results'))
+invisible(gc())
+##
+## ########################################################
+@
+\caption{Density plots of the location of diagnostic features for (a) smectite, (b) kaolinite and (c) illite. The red vertical line is the location of the feature on the reference spectra and the blue line the location accordining to \citet{Clark1990}. }\label{fig:diagnosticClay}
+\end{figure}
+
+<<analysis-mineralogy-clay-relative-abundance, echo =F, cache = T, results = hide,dependson =mineral-abundance >>=
+## ########################################################
+## calculate the relative abundance of the different     ##
+## clay minerals                                         ##
+## ########################################################
+##
+## load the required data
+clay_diagnostic_results <- load_as(.file_path = processed_spectra_directory, .name = 'clay_diagnostic_results')
+clay_reference_diagnostic_results  <- load_as(.file_path = processed_spectra_directory, .name = 'clay_reference_diagnostic_results')
+##
+## caculate the relative abundances
+##
+## organize the data and arguments
+names(clay_diagnostic_results)[1] <- '.mineral'
+##
+## create argument list
+clay_abundance_arguments <- merge(clay_diagnostic_results,ddply(clay_reference_diagnostic_results, .(.mineral), splat(function( minimum, ...){data.frame( reference_value = minimum)}) ))
+##
+## calculate the relative abundances
+clay_diagnostic_results$relative_abundance <-  splat(relative_abundance)(clay_abundance_arguments)
+##
+## save results
+save_as(.object = clay_diagnostic_results, .file_path = processed_spectra_directory, .name = 'relative_abundance_clay')
+## 
+## clean up
+rm(list = c('clay_diagnostic_results','clay_reference_diagnostic_results', 'clay_abundance_arguments' ))
+invisible(gc())
+##
+## ########################################################
+@
+
+\begin{figure}[tbp]
+\centering
+<<figure-clay-mineralogy-relative-abundance,  fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 6.5, fig.height = 3.25, cache = T, background = 1;1;1, warning = F, dependson = setup-libraries;mineral-abundance, results=hide, message=F>>=
+## ########################################################
+## create a plot of the relative abundance distributions ##
+## for the clay minerals                                 ##
+## ########################################################
+##
+## load required data
+clay_relative_abundance <- load_as(.file_path = processed_spectra_directory, .name = 'relative_abundance_clay')
+##
+## create the ploy
+ggplot(clay_relative_abundance)+
+  geom_density(aes(x= relative_abundance, colour= using)) + 
+  facet_wrap(~.mineral,scales='free', nrow=1)+
+  ylab('Density') + 
+  xlab('Abundance') +
+  scale_colour_manual('Method', breaks = c('deriv_1','local_minimum'), labels = c('Derivative','Local minimum'), values = c('black','darkgrey')) +
+  opts(legend.title = theme_text(  size = 12 * 0.8, hjust = 0, face = 'plain'), panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(), strip.background = theme_blank(),strip.text.x = theme_blank())
+##
+## add the a, b , c labels
+grid.text(x = 0.05, y = 0.97, label = '(a)')
+grid.text(x = 0.32, y = 0.97, label = '(b)')
+grid.text(x = 0.59, y = 0.97, label = '(c)')
+##
+## clean up
+rm(clay_relative_abundance)
+invisible(gc())
+##
+## ########################################################
+@
+\caption{Density plots of the relative abundance (a) illite, (b) kaolinite and (c) smectite caculated on the sample spectra. }\label{fig:abundance:clay}
+\end{figure}
+
+
+\section{Iron oxide mineralogy} \label{section:Fe}
+Absorbtion due to hematite and goethite occure near 880 nm and 920 nm \citep{Clark1990}. 
+Previous work has found the identifying thes presence of these Fe oxides was difficult due to shifts in the exact location, presence in small amounts   and masking by a  broad absorbtion due to organic matter at 650 nm \citep{ViscarraRossel2010}. 
+ To account for this possible shift, they located the local minimum reflectance in $[860 - 930]$ for hematite and $[910 - 970]$ for goethite.
+ Once the locations of the local minima are  found, the absorption band depth ($D_{\lambda}$) for the particular wavelength $\lambda$ was calculated by
+ \begin{equation}\label{eq:banddepth}
+ D_{\lambda} = 1 - CR
+ \end{equation}
+where CR is the continuum-removed reflectance value.
+ As an alternative, we use the wavelength and value associated with the maximum absorbtion band depth in the two wavelength ranges. 
+
+
+We use these absorption depths for hematite and goethite to calculate a normalized  Fe Oxide difference index (NIODI)  \citep{ViscarraRossel2010}
+ \begin{equation}\label{eq:NIODI}
+ NIODI = \frac{D_{920} - D_{880}}{D_{920}+D_{880}}
+ \end{equation}
+ 
+<<organize-fe-oxide-mineralogy, echo = F, results = hide, cache = T>>=
+## ########################################################
+## set up for iron oxide abundance calculations          ##
+## set wavelength intervals for hematite and goethite    ##
+## ########################################################
+##
+## set bandwidth information for iron oxides fo
+fe_minerals_list  <- list(hematite = list(.interval = 860:930, mineral = 'hematite', .diagnostic = 880), goethite = list(.interval = 910:970, mineral = 'goethite', .diagnostic = 920))
+##
+## ########################################################
+@
+
+<<readin-fe-oxide-reference-spectra, cache = T, echo = F, results = hide, dependson = continuum-removal; functions-mineralogy>>=
+## ########################################################
+## read in the reference spectra for iron oxide minerals ##
+## from USGS spectra                                     ##
+## process using s-g filter                              ##
+## ########################################################
+fe_reference_list <- list(hematite = list( .spectra_fname = 'hematite_fe2602.9271.asc', mineral = 'hematite',       .type = 'reflect'), goethite = list(.spectra_fname = 'goethite_ws220.8392.asc', mineral = 'goethite', .type= 'reflect'))
+##
+## read in spectra and save
+fe_reference <- ldply(fe_reference_list, splat(read_reference_spectra), .all = wavelengths,                       .save_path = raw_spectra_directory)
+##
+## process with sg-filter
+fe_reference_sg <- ddply(fe_reference, .(mineral), splat(filter_sg), n = 11, p = 2, m = 0,                           .save_path =  processed_spectra_directory, .spectra_ext = '.RData')
+##
+## ########################################################
+@
+
+ 
+<<analysis-mineralogy-fe-oxide-continuum-removal, cache = T, results = hide, echo = F,dependson =organize-fe-oxide-mineralogy; functions-filter-continuum-removal>>=
+## ########################################################
+## Calculate the continuum removed spectra in each       ##
+## waveband interval for the iron oxide minerals         ##
+## ########################################################
+## organize the filter arguments as a list   
+filter_cr_fe_arguments <- llply(fe_minerals_list, function(x,y){c(x,as.list(y))}, y = filter_sg_files[1,])   
+##
+## run the continuum removal
+fe_minerals_cr_files <-ldply(filter_cr_fe_arguments, splat(filter_continuum_removal), .save_path = processed_spectra_directory, .all = wavelengths)
+##
+## ########################################################
+## Continuum removal for reference spectra for the       ##
+## clay minerals                                         ##  
+## ########################################################
+## 
+## organize the arguments as a list
+fe_reference_cr_list <-  alply( fe_reference_sg, 1, combine_list, .which_x = names(fe_reference_sg[,-1]), .y = fe_minerals_list, .which_y = names(fe_minerals_list[[1]]), .id.var = 'mineral')
+## 
+## run the continuum-removal 
+fe_reference_cr_files <-ldply(fe_reference_cr_list, splat(filter_continuum_removal), .save_path = processed_spectra_directory, .all = wavelengths)
+##
+## ########################################################
+@
+
+<<organize-spectra-quantiles-fe-oxide, echo = F, cache = T, dependson = analysis-mineralogy-fe-oxide-continuum-removal>>=
+## ########################################################
+## create quantiles of the continuum-removed spectra     ##
+## for plotting against the reference spectra            ##
+## Iron oxides                                           ##
+## ########################################################
+##
+## organize the arguments
+fe_quantiles_cr_arguments <-  alply( fe_minerals_cr_files, 1, combine_list, .which_x = names(fe_reference_sg[,-1]), .y = fe_minerals_list, .which_y = names(fe_minerals_list[[1]]), .id.var = 'mineral')
+##
+## get the quantiles of the cr-spectra for the samples
+fe_cr_quantiles <- ldply(fe_quantiles_cr_arguments, splat(spectral_quantiles), probs =c(0.05,0.06, 0.5,0.84, 0.95),  .save_path = processed_spectra_directory)
+##
+## ########################################################
+## get the reference spectra in the same format   
+##
+## an argument list
+fe_reference_arguments <-  alply( fe_reference_cr_files, 1, combine_list, .which_x = names(fe_reference_sg[,-1]), .y = fe_minerals_list, .which_y = names(fe_minerals_list[[1]]), .id.var = 'mineral')
+##
+## and reading and organizing
+fe_reference_spectra <- ldply( fe_reference_arguments, splat (function(.spectra_path, .spectra_name, .interval, mineral, ...){ data.frame(value = load_as(.file_path = .spectra_path, .name = .spectra_name), wavelength = .interval,.mineral = mineral)}))
+##
+## ########################################################
+## and the diagnostic bands
+##
+## set up diagnostic bands as a data frame
+fe_diagnostic <- ldply(fe_minerals_list,splat(function(mineral,.diagnostic,...){data.frame(mineral, wavelength = .diagnostic)}))
+##
+## #######################################################   
+## save the results
+save_as(.object = fe_cr_quantiles, .file_path  = processed_spectra_directory, .name= 'fe_cr_quantiles')
+save_as(.object = fe_reference_spectra, .file_path  = processed_spectra_directory, .name= 'fe_reference_spectra')
+save_as(.object = fe_diagnostic, .file_path  = processed_spectra_directory, .name= 'fe_diagnostic')
+##
+## tidy up
+rm(list = c('fe_cr_quantiles', 'fe_reference_spectra', 'fe_diagnostic', 'fe_reference_arguments', 'fe_quantiles_cr_arguments' ))
+invisible(gc())
+##
+## ########################################################
+@
+
+
+\begin{figure}[tbp]
+\centering
+<<figure-spectra-quantiles-fe,  fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 6.5,fig.height=3.25,cache = T, background = 1;1;1, warning = F, dependson = setup-libraries;organize-spectra-quantiles-fe ,results=hide,message=F>>=
+## ########################################################
+## figure comparing the continuum removed spectra        ##
+## with the reference spectra                            ##
+## ########################################################
+##
+## load  the required data
+fe_mineral_quantiles <- load_as( .file_path  = processed_spectra_directory, .name= 'fe_cr_quantiles')
+fe_mineral_reference <- load_as( .file_path  = processed_spectra_directory, .name= 'fe_reference_spectra')
+fe_mineral_diagnostics <- load_as( .file_path  = processed_spectra_directory, .name= 'fe_diagnostic')
+## 
+## create the plot
+ggplot(fe_mineral_quantiles,aes(x = wavelength,y = 1-value)) + 
+  geom_line(aes(colour = variable)) + 
+  geom_line(data = fe_mineral_reference, colour = 'red') + 
+  facet_wrap(~ mineral ,nrow = 1, scales = 'free') +
+  geom_vline(data = fe_mineral_diagnostics, aes( xintercept = wavelength)) + 
+  ylab('Continuum-removed reflectance')+
+  xlab('Wavelength / nm') + 
+  scale_y_continuous( formatter = 'drop0trailing.format', expand= c(0.01,0)) +
+  scale_colour_brewer('Soil spectra \n (Quantiles)', palette = 'Greys') +
+  opts(legend.title = theme_text(  size = 12 * 0.8, hjust = 0, face = 'plain'), 
+       panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(), 
+       strip.background = theme_blank(),strip.text.x = theme_blank())
+##
+## add the a, b , c labels
+grid.text(x = 0.05, y = 0.97, label = '(a)')
+grid.text(x = 0.49, y = 0.97, label = '(b)')
+##
+## ########################################################
+## clean up
+rm(list = c('fe_mineral_diagnostics', 'fe_mineral_quantiles', 'fe_mineral_reference'))
+invisible(gc())
+##
+## ########################################################
+@
+\caption{Continuum-removed reflectance for diagnostic wavelengths of various Iron oxide minerals: (a) Hematice, (b) Goethite. The red lines are the continuum-removed reflectance for each of the reference iron oxide minerals while the vertical black lines are the diagnostic wavelengths used by \citet{ViscarraRossel2011}. }\label{fig:fe-oxidemineralogy}
+\end{figure}
+
+
+Figure~\ref{fig:fe-oxidemineralogy} shows the continuum-removed reflectance in the wavelength bands for hematite and goethite. 
+
+<<analysis-mineralogy-fe-oxide-abundance, cache = T, echo = F, results = hide, dependson = functions-mineralogy-abundance; organize-spectra-quantiles-clay>>=
+## #########################################################
+## calculations for mineral abundance                     ##
+## iron oxide minerals                                    ##
+## #########################################################
+##
+## load the required data
+fe_mineral_diagnostics <- load_as(.file_path  = processed_spectra_directory, .name = 'fe_diagnostic')
+fe_mineral_reference <- load_as(.file_path  = processed_spectra_directory, .name = 'fe_reference_spectra')
+##
+## create the extended band widths -- note that these are not symmetric
+fe_diagnostic_wideband <- llply(fe_minerals_list, splat(function(.interval,...){data.frame(.between = range(.interval))}))
+##
+## create the the argument list for identifying the local mimimum within the band range for the reference spectra
+fe_reference_diagnostic_list <- dlply(fe_mineral_reference, .(.mineral), combine_list , 
+  .which_x = c('value','wavelength'), .y = fe_diagnostic_wideband, .which_y = '.between', .id.var = 'mineral')
+##
+## identify the location of the diagostic features and the value in the reference spectra
+fe_reference_diagnostic_results <- ldply(fe_reference_diagnostic_list, .fun = splat(identify_local_minima))
+##
+## ########################################################
+## now for the sample spectra
+##
+## create the argument list
+fe_spectra_diagnostic_list <- llply(dlply( join(fe_minerals_cr_files, fe_mineral_diagnostics), .(.id), combine_list,.which_x = c('.spectra_path', '.spectra_name','.id'), .y = fe_diagnostic_wideband, .which_y = '.between', .id.var = '.id'), combine_list, .which_x = c('.spectra_path', '.spectra_name', '.id','.between'),  .y = filter_cr_fe_arguments,   .which_y = '.interval',.id.var = '.id')                             
+##
+## identify using local minimum and derivatives
+fe_diagnostic_results <- ldply(fe_spectra_diagnostic_list, splat(spectral_minima_multiple))
+##
+## ########################################################
+## save 
+save_as(.object = fe_reference_diagnostic_results, .file_path = processed_spectra_directory, .name = 'fe_reference_diagnostic_results')
+save_as(.object = fe_diagnostic_wideband, .file_path = processed_spectra_directory, .name = 'fe_diagnostic_wideband')
+save_as(.object = fe_diagnostic_results, .file_path = processed_spectra_directory, .name = 'fe_diagnostic_results')
+##
+## clean up
+rm(list = c('fe_reference_diagnostic_results', 'fe_diagnostic_wideband', 'fe_diagnostic_results', 'fe_spectra_diagnostic_list', 'fe_reference_diagnostic_list'))
+invisible(gc())
+##
+## ########################################################
+@
+
+
+\begin{figure}[tbp]
+\centering
+<<figure-fe-mineralogy-diagnostic-bands,  fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 6.5, fig.height = 3.25, cache = T, background = 1;1;1, warning = F, dependson = setup-libraries;analysis-mineralogy-fe-abundance, results=hide, message=F>>=
+## ########################################################
+## a figure showing the location of diagnostic wavebands ##
+## for various fe minerals                             ##
+## ########################################################
+##
+## load required data 
+fe_mineral_diagnostics <- load_as(.file_path  = processed_spectra_directory, .name = 'fe_diagnostic')
+fe_diagnostic_results <- load_as(.file_path = processed_spectra_directory, .name = 'fe_diagnostic_results')
+fe_reference_diagnostic_results  <- load_as(.file_path = processed_spectra_directory, .name = 'fe_reference_diagnostic_results')
+##
+## make everything uniform in type and names
+fe_reference_diagnostic_results$.id <- as.character(fe_reference_diagnostic_results$.mineral)
+##
+## create plot
+ggplot(fe_diagnostic_results, aes(x= diagnostic_band, colour = using))  +
+  geom_density() + 
+  ylab('Density') + 
+  xlab('Wavelength') +
+   geom_vline(data = fe_mineral_diagnostics ,aes( xintercept = wavelength), colour ='red') +
+   geom_vline(data = fe_reference_diagnostic_results ,aes( xintercept = diagnostic_band), colour ='blue') +
+   scale_colour_manual('Method', breaks = c('deriv_1','local_minimum'), labels = c('Derivative','Local minimum'), values = c('black','darkgrey'))+
+   facet_wrap(~.id, scales='free', ncol = 2)+
+   opts(legend.title = theme_text(  size = 12 * 0.8, hjust = 0, face = 'plain'), panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(), strip.background = theme_blank(),strip.text.x = theme_blank())
+##
+## add the a, b , c labels
+grid.text(x = 0.05, y = 0.97, label = '(a)')
+grid.text(x = 0.45, y = 0.97, label = '(b)')
+##
+## tidy up
+rm( list = c('fe_mineral_diagnostics', 'fe_diagnostic_results', 'fe_reference_diagnostic_results'))
+invisible(gc())
+##
+## ########################################################
+@
+\caption{Density plots of the location of diagnostic features for (a) hematite, (b) goethite. The blue vertical line is the location of the feature on the reference spectra and the red line the location accordining to \citet{Clark1990}. }\label{fig:diagnostic-feoxide}
+\end{figure}
+
+<<analysis-mineralogy-fe-oxide-relative-abundance, echo =F, cache = T, results = hide,dependson =mineral-abundance >>=
+## ########################################################
+## calculate the relative abundance of the different     ##
+## iron oxide minerals                                   ##
+## ########################################################
+##
+## load the required data
+fe_diagnostic_results <- load_as(.file_path = processed_spectra_directory, .name = 'fe_diagnostic_results')
+fe_reference_diagnostic_results  <- load_as(.file_path = processed_spectra_directory, .name = 'fe_reference_diagnostic_results')
+##
+## caculate the relative abundances
+##
+## organize the data and arguments
+names(fe_diagnostic_results)[1] <- '.mineral'
+##
+## create argument list
+fe_abundance_arguments <- merge(fe_diagnostic_results,ddply(fe_reference_diagnostic_results, .(.mineral), splat(function( minimum, ...){data.frame( reference_value = minimum)}) ))
+##
+## calculate the relative abundances
+fe_diagnostic_results$relative_abundance <-  splat(relative_abundance)(fe_abundance_arguments)
+##
+## save results
+save_as(.object = fe_diagnostic_results, .file_path = processed_spectra_directory, .name = 'relative_abundance_fe')
+## 
+## clean up
+rm(list = c('fe_diagnostic_results','fe_reference_diagnostic_results', 'fe_abundance_arguments' ))
+invisible(gc())
+##
+## ########################################################
+@
+
+\begin{figure}[tbp]
+\centering
+<<figure-fe-oxide-mineralogy-relative-abundance,  fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 6.5, fig.height = 3.25, cache = T, background = 1;1;1, warning = F, dependson = setup-libraries;mineral-abundance, results=hide, message=F>>=
+## ########################################################
+## create a plot of the relative abundance distributions ##
+## for the iron oxide minerals                           ##
+## ########################################################
+##
+## load required data
+fe_relative_abundance <- load_as(.file_path = processed_spectra_directory, .name = 'relative_abundance_fe')
+##
+## create the plot
+ggplot(fe_relative_abundance)+
+  geom_density(aes(x= relative_abundance, colour= using)) + 
+  facet_wrap(~.mineral,scales='free', nrow=1)+
+  ylab('Density') + 
+  xlab('Abundance') +
+  scale_colour_manual('Method', breaks = c('deriv_1','local_minimum'), labels = c('Derivative','Local minimum'), values = c('black','darkgrey')) +
+  opts(legend.title = theme_text(  size = 12 * 0.8, hjust = 0, face = 'plain'), panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(), strip.background = theme_blank(),strip.text.x = theme_blank())
+##
+## add the a, b , c labels
+grid.text(x = 0.04, y = 0.97, label = '(a)')
+grid.text(x = 0.45, y = 0.97, label = '(b)')
+##
+## clean up
+rm(fe_relative_abundance)
+invisible(gc())
+##
+## ########################################################
+@
+\caption{Density plots of the relative abundance (a) hematite and (b) goethite (c) smectite caculated on the sample spectra. }\label{fig:abundance:fe}
+\end{figure}
+
+<<analysis-fe-oxide-normalized-difference, echo = T, cache = T, results = hide, dependson =functions-mineralogy-abundance;nalysis-mineralogy-fe-oxide-continuum-removal;analysis-mineralogy-fe-oxide-relative-abundance>>=
+## ########################################################
+## calculate the difference index for                    ##
+## hematite and goethite                                 ##
+## ########################################################
+##
+## load data and cast in form useful for the normalized difference
+fe_minima <- cast(melt(load_as(.file_path = processed_spectra_directory, .name = 'fe_diagnostic_results'), id.var = c('.id','X1','using'), measure.var = 'minimum'),X1~.id+using)
+##
+## do the calculations for the local- derivative-derived minima
+nd_fe_local <- with(fe_minima, normalized_difference(A = goethite_deriv_1, B = hematite_deriv_1))
+nd_fe_deriv <- with(fe_minima, normalized_difference(A = goethite_deriv_1, B = hematite_deriv_1))
+##
+## create single data frame
+ndi_fe_data <- reshape2:::melt.data.frame(data.frame(local_minimum = nd_fe_local, deriv_1 =nd_fe_deriv ), measure.vars = c('local_minimum','deriv_1'), variable.name = 'method', value.name = 'ndi_fe')
+##
+## save results
+save_as(.object = ndi_fe_data, .file_path = processed_spectra_directory, .name = 'ndi_fe_data')
+##
+## clean up
+rm(list = c('niodi_data','nd_fe_local','nd_fe_deriv','fe_minima'))
+invisible(gc())
+## ########################################################
+@
+
+\begin{figure}[tbp]
+\centering
+<<figure-fe-oxide-difference-index,  fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 6.5, fig.height = 3.25, cache = T, background = 1;1;1, warning = F, dependson = setup-libraries;mineral-abundance, results=hide, message=F>>=
+## ########################################################
+## create a plot of the normalized difference index      ##
+## for the iron oxide minerals                           ##
+## ########################################################
+##
+## load required data
+ndi_fe_data <- load_as(.file_path = processed_spectra_directory, .name = 'ndi_fe_data')
+##
+## create the plot
+ggplot(ndi_fe_data)+
+  geom_density(aes(x=ndi_fe, colour= method)) + 
+  ylab('Density') + 
+  xlab('Normalized Iron oxide difference index') +
+  scale_colour_manual('Method', breaks = c('deriv_1','local_minimum'), labels = c('Derivative','Local minimum'), values = c('black','darkgrey')) +
+  opts(legend.title = theme_text(  size = 12 * 0.8, hjust = 0, face = 'plain'), panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(), strip.background = theme_blank(),strip.text.x = theme_blank())
+##
+## clean up
+rm(ndi_fe_data)
+invisible(gc())
+##
+## ########################################################
+@
+\caption{Density plots of the Normalized Iron oxide difference index derived using two methods. Positive values indicate the presence of goethite, negative values hematite. Values approaching zero indicate either the index cannot determine a dominant mineral.   }\label{fig:nd-fe}
+\end{figure}
+
+
+
+\section{Refined predictive models}
+\subsection{Removing spectral outliers}
+\subsubsection{Visual inspection of raw spectra}
+
+<<organize-identify-spectral-outliers, echo = F, cache = T, results = hide, dependson = functions-basic; readin-soildata; readin-spectra>>=
+## ########################################################
+## inspecting the raw spectra showed that two samples    ##
+## were outliers or had errors when recorded             ##
+## Here, create a data frame to show these problematic   ##
+## spectra    c(1981,3144)                               ##
+## ########################################################
+## 
+## set up outlier identifiers
+visual_outliers <- c(1981,3144)
+##
+## get their identifiers
+visual_outliers_id <- as.character(soil_data$user_horizon_id[visual_outliers])
+##
+## ########################################################
+## load and arrange outlier spectra
+## get arguments
+outlier_arguments <- merge(raw_spectra_files, data.frame( .which =  c(visual_outliers,visual_outliers + 1), .is_outlier = rep(c('outlier','regular'), each = 2), .group = rep(visual_outliers_id,2)) )
+##
+##create data.frame
+outlier_spectra <- adply(outlier_arguments,1, splat(load_single_spectra), wavelengths = wavelengths)
+##
+## ########################################################
+## remove from soil sample data
+##
+soil_data_v <- soil_data[-visual_outliers,] 
+##
+## add row id
+soil_data_v$row_index <- as.numeric(row.names(soil_data_v))
+##
+## ########################################################
+## save objects
+save_as(.object = outlier_spectra, .file_path = raw_spectra_directory, .name = 'outlier_spectra')
+save_as(.object = soil_data_v, .file_path = saved_data_directory, .name = 'soil_data_no_visual_outliers')
+save_as(.object = visual_outliers_id,  .file_path = saved_data_directory, .name = 'visual_outliers_id')
+##
+##
+
+## clean up
+rm(c('outlier_arguments','outlier_spectra', 'soil_data_v'))
+invisible(gc())
+##
+## ########################################################
+@
+
+One sample [\Sexpr{load_as( .file_path = saved_data_directory, .name = 'visual_outliers_id')[1] }] was removed due as an spectral outlier or an error in recording. 
+ Another sample [\Sexpr{load_as( .file_path = saved_data_directory, .name = 'visual_outliers_id')[2] }]  was removed as the spectrum recorded was a horizontal line at reflectance = 1.
+ Figure~\ref{fig:spectral-outlier} shows this spectrum with a comparison spectrum from a lower horizon in the same profile.
+
+\begin{figure}[tbp]
+\centering
+<<figure-spectral-outlier,cache = T, fig = T, dev = tikz, fig.height = 3, fig.width = 6, out.width = 0.9\textwidth, results = hide, echo = F, background = 1;1;1, dependson = organize-identify-spectral-outliers>>=
+## ########################################################
+## create the plot of the outlier spectra                ##
+## with comparison spectra                               ##
+## ########################################################
+##
+## load required data
+outlier_spectra <- load_as(.file_path = raw_spectra_directory, .name = 'outlier_spectra')
+## 
+## create nice labels
+levels(outlier_spectra$.type) <- c('$R$', '$ - {\\rm log} ( R)$')
+##
+## create plot
+ggplot(outlier_spectra,aes(y=value, x =wavelengths, colour = .is_outlier, group = factor(.which)))+ 
+  geom_line() + 
+  facet_grid(.type~ .group,scales='free') +
+  scale_colour_manual('Sample \n type', values = c('red','black')) +
+  xlab('Wavelengths / nm') +
+  ylab('Value')+
+  opts(legend.title = theme_text(  size = 12 * 0.8, hjust = 0, face = 'plain'), panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(), strip.background = theme_blank())
+##
+## clean up
+rm(outlier_spectra)
+invisible(gc())
+##
+## ########################################################
+@
+\caption{Outlier (red) and comparison spectra  (black).}\label{fig:spectral-outlier}
+\end{figure}
+
+\subsubsection{Statistical methods for multivariate outliers}
+
+The Mahalanobis distance can also be used to assess whether  a sample is a potential outlier. 
+ The   Mahalanobis distance was calculated on the scores of the first five PLS factors. The rates of outlier detection using normal and robust estimates are shown in table~\ref{table:mvOutliers}
+ 
+<<functions-outlier-detection, cache = T, echo = F, results = hide, dependson = functions-basic;organize-identify-spectral-outliers>>=
+## ########################################################
+## functions to detect outliers using mahalanobis         ##
+## distance                                              ##
+###########################################################
+mahalanobis_outlier <- function(value, variable, .id_column, plsr_scores = 5, .spectra_path, .spectra_name, .keep, critical_value, ... ){
+  ## ######################################################
+  ## a function to calculate the mahalanobis distance    ##
+  ## for the first plsr_scores (default = 5) pls scores  ##
+  ## and then use chi squared statistic to identify      ##
+  ## outliers                                           ##
+  ## ######################################################
+  ##
+  ## get the row indexes
+  other_args <- list(...)
+  id_samples <- other_args[[.id_column]]
+  ##
+  ## load spectra -- trimming appropriately
+  spectra <- load_as(.file_path = .spectra_path, .name = .spectra_name)[id_samples,.keep]
+  ##
+  ## organize data
+  pls_data <- data.frame(value, spectra = I(as.matrix(spectra)))
+  ##
+  ## fit the model
+  pls_model <- plsr(value ~spectra, data = pls_data, ncomp = plsr_scores)
+  ##
+  ## get the pls scores scores
+  variable_scores <- scores(pls_model)
+  ##
+  ## calculate Mahalanobis distance on scores and test 
+  ## for significance
+  ## uses sign1 from the mvoutlier pacakge
+  outlier_test <- sign1(variable_scores, qcrit = critical_value)
+  ##
+  ## return data frame  showing which samples are outliers
+  potential_outlier <- !as.logical(outlier_test$wfinal01)
+  return(data.frame(potential_outlier, row_index = id_samples))
+  ##
+  }
+## ########################################################
+
+@
+<<analysis-mahalanobis-outlier-detection,cache = T, echo = F, results = hide, warning=F; dependson = organize-identify-spectral-outliers;functions-outlier-detection >>=
+## ########################################################
+## identify multivariate spectral (and variable) outliers #
+## using mahalanobis distance                            ##
+## and sg filtered first derivative                      ##
+## ########################################################
+##
+## load required soil property data
+## visual outliers removed!
+soil_data_no_v_o <- load_as(.file_path = saved_data_directory, .name = 'soil_data_no_visual_outliers')
+##
+## melt to appropriate format (removing NAs )
+molten_soil_no_v_o <- melt(soil_data_no_v_o, id.vars = c('user_pedon_id', 'lab_project_name','lab_horizon_id','row_index'),measure.vars = which_properties, na.rm=T)
+##
+## reflectance outliers
+reflectance_sgd1_outliers <- ddply(molten_soil_no_v_o, .(variable), splat(mahalanobis_outlier), .id_column = 'row_index', plsr_scores = 5, .spectra_path = filter_sg_sub10_files[2,'.spectra_path'], .spectra_name =filter_sg_sub10_files[2,'.spectra_name'], .keep = 1:206, critical_value = 0.975)
+##
+## absorbance outliers
+absorbance_sgd1_outliers <- ddply(molten_soil_no_v_o, .(variable), splat(mahalanobis_outlier), .id_column = 'row_index', plsr_scores = 5, .spectra_path = filter_sg_sub10_files[4,'.spectra_path'], .spectra_name =filter_sg_sub10_files[4,'.spectra_name'], .keep = 1:206, critical_value = 0.975)
+##
+## save
+save_as(.object = molten_soil_no_v_o, .file_path = saved_data_directory, .name = 'molten_soil_no_v_o')
+save_as(.object = reflectance_sgd1_outliers, .file_path = training_info_directory, .name = 'reflectance_sgd1_outliers')
+save_as(.object = absorbance_sgd1_outliers, .file_path = training_info_directory, .name = 'absorbance_sgd1_outliers')
+##
+## clean up
+rm(list = c('soil_data_no_v_o', 'molten_soil_no_v_o', 'reflectance_sgd1_outliers', 'absorbance_sgd1_outliers'))
+invisible(gc())
+##
+## ########################################################
+@
+
+\begin{table}[tbp]
+\caption{Proportion of outliers per variable calculated using the Mahalanobis distance}
+\label{table:mvOutliers}
+\centering
+<<table-mahalanobis-outliers, echo=F, results = tex, cache = F, dependson = setup-libraries;analysis-mahalanobis-outlier-detection ,warning=F,message=F>>=
+## ########################################################
+## creates a table noting the total number of samples    ##
+## and outliers for each soil variable and spectral type ##
+## format a table using booktabs in LaTeX                ##
+## ########################################################
+##
+## load required data
+outliers_sgd1 <- melt(rbind(data.frame(load_as( .file_path = training_info_directory, .name = 'reflectance_sgd1_outliers'), .type = 'Reflectance'),data.frame(load_as( .file_path = training_info_directory, .name = 'absorbance_sgd1_outliers'), .type = 'Absorbance') ) , .id.vars = c('.type','variable','row_index'))
+##
+## make into a table
+outliers_sgd1_table <- cast(ddply(outliers_sgd1, .(variable, .type), summarise, total = length(value), n_outliers = length(value) *(1- mean(value))),  variable ~ .type, variable = 'n_outliers')
+##
+## add the 'total' column
+outliers_sgd1_table$Total <- cast(ddply(outliers_sgd1, .(variable, .type), summarise, total = length(value), n_outliers = length(value) *(1- mean(value))),  variable ~ .type,value = 'total')$Reflectance
+##
+## set the row names to latexed properties
+row.names(outliers_sgd1_table) <- properties_to_latex(outliers_sgd1_table$variable)
+##
+## create xtable object
+outliers_sgd1_xtable <- xtable(outliers_sgd1_table[,-1], digits=0)
+##
+## and print as booktabs
+booktabs.xtable(outliers_sgd1_xtable) 
+##
+## ########################################################
+@
+\end{table}
+
+
+
+\subsection{Sampling}
+\subsubsection{Resampling methods}
+Previously each sampled horizon was considered separately.  
+ Alternative subsampling paradigms  include sample (i) profiles or (ii) projects to provide more realistic subsets for training and validation.
+ Another approach is to order the variable from lowest to highest and sample every third row as a validation data set.
+
+<<functions-sampling-methods, echo = F, cache = T, results = hide, depends = functions-basic>>=
+## ########################################################
+## functions for sampling by a second identifying column ##
+## such as profiles or projects                          ##
+## also functions for sampling by ordering the variable  ##
+## ########################################################
+sample_by <- function(variable, value, .rate, .by, .id_column, ...){
+   ## get sample ids
+  other_args <- list(...)
+  id_samples <- other_args[[.id_column]]
+  ##
+  ## get the identifier by which we are sampling
+  id_by <- as.character(other_args[[.by]])
+  ##
+  ## how many unique identifiers
+  unique_by <- unique(id_by)
+  ##
+  ## how many samples?
+  n_samples <- floor(.rate* length(unique_by))
+  ## which samples
+  sampled_by_ids <- sample( unique_by, size = n_samples)
+  ##
+  ## which are in the training set
+  rows_training <- which(id_by %in% sampled_by_ids)
+  ##
+  ## which are in the validation set
+  rows_validation <- seq(along = id_by)[-rows_training]
+  ##
+  ## by_ids
+  id_validation <- id_by[rows_validation]
+  id_training <- id_by[rows_training]
+  ##
+  ## the data sets
+  data_training <- value[rows_training]
+  data_validation <- value[rows_validation]
+  data_all <- value
+  ##
+  ## make a named list
+  training_info <- llist(data_all,data_training, data_validation, id_validation, id_training, id_samples, rows_validation,rows_training)
+  ## 
+  ## rename and save
+  .property <- unique(as.character(variable))
+  training_info$variable <- .property
+  obj_name <- paste(.property,'by',.by,'training_info',sep='_')
+  save_as(.object = training_info, .file_path = .save_path, .name = obj_name)
+  ##
+  ## return the named list
+  return(training_info)
+  ##
+  }
+## ########################################################
+sample_ordered <- function(variable, value, .every = 3, .id_column, ...){
+   ## get sample ids
+  other_args <- list(...)
+  id_samples <- other_args[[.id_column]]
+  ## 
+  ## get the order of the values
+  order_value <- order(value)
+  ##
+  ## order the sample ids by the values
+  ordered_samples <- id_samples[order_value]
+  ##
+  ## create full vector
+  all_samples <- seq(along = ordered_samples)
+  ##
+  ## subset every third for a validation data set
+  rows_training <- all_samples[(all_samples %% .every) > 0]
+  rows_validation <-  all_samples[(all_samples %% .every) == 0]
+  ##
+  ## create the data sets
+  data_all <- sort(value)
+  data_training <- data_all[(all_samples %% .every) > 0]
+  data_validation <- data_all[(all_samples %% .every) == 0]
+  ##
+  ## create list
+  training_info <- llist(data_all,data_training, data_validation, rows_validation, rows_training)
+  training_info$id_samples <- ordered_samples
+  ##
+  ## rename and save
+  .property <- unique(as.character(variable))
+  training_info$variable <- .property
+  obj_name <- paste(.property,'ordered','training_info',sep='_')
+  save_as(.object = training_info, .file_path = .save_path, .name = obj_name)
+  ##
+  ## return the named list
+  return(training_info)
+  ##
+  }
+## ########################################################
+@
+
+
+<<analysis-sampling-by, echo = F, cache = T, results = hide; dependson = functions-sampling-methods>>=
+## ########################################################
+## sampling by profiles, projects                        ##
+## visual outliers removed                               ##
+## ########################################################
+## 
+## load required data
+molten_soil_data_no_v_o <- load_as(.file_path = saved_data_directory, .name = 'molten_soil_no_v_o')
+##
+## sampling by profiles
+sampled_by_profiles <- dlply(molten_soil_data_no_v_o, .(variable), splat(sample_by), .rate = 0.7,.by = 'user_pedon_id', .id_column = 'row_index' )
+##
+## sampling by projects
+sampled_by_projects <- dlply(molten_soil_data_no_v_o, .(variable), splat(sample_by), .rate = 0.7,.by = 'lab_project_name', .id_column = 'row_index' )
+##
+## save objects
+save_as(.object = sampled_by_projects, .file_path = training_info_directory, .name = 'sampled_by_projects')
+##
+save_as(.object = sampled_by_profiles, .file_path = training_info_directory, .name = 'sampled_by_profiles')
+##
+## clean up
+rm(list = c('sampled_by_projects','sampled_by_profiles'))
+##
+invisible(gc())
+##
+## ########################################################
+@
+
+
+<<analysis-sampling-mahalanobis-outliers-and-ordered, cache = T, echo = F, results = hide, dependson = functions-sampling-methods;analysis-mahalanobis-outlier-detection >>=
+## ########################################################
+## sampling by ordering non-multivariate outliers        ##
+## ########################################################
+##
+## load the required data
+reflectance_sgd1_outliers <- load_as( .file_path = training_info_directory, .name = 'reflectance_sgd1_outliers')
+##
+absorbance_sgd1_outliers <- load_as( .file_path = training_info_directory, .name = 'absorbance_sgd1_outliers')
+##
+molten_soil_data_no_v_o <- load_as(.file_path = saved_data_directory, .name = 'molten_soil_no_v_o')
+##
+## join and remove the potential outliers
+soil_data_no_reflect_sgd1_outliers <- subset(join(molten_soil_data_no_v_o,reflectance_sgd1_outliers), potential_outlier == F)
+##
+soil_data_no_abs_sgd1_outliers <- subset(join(molten_soil_data_no_v_o,absorbance_sgd1_outliers), potential_outlier == F)
+##
+## ordered sampling for reflectance and absorbance
+ordered_sample_no_reflect_sgd1_outliers <- dlply(soil_data_no_reflect_sgd1_outliers, .(variable), splat(sample_ordered), .every = 3, .id_column = 'row_index' )
+##
+ordered_sample_no_abs_sgd1_outliers <- dlply(soil_data_no_abs_sgd1_outliers, .(variable), splat(sample_ordered), .every = 3, .id_column = 'row_index' )
+##
+## save objects
+save_as(.object = ordered_sample_no_reflect_sgd1_outliers, .file_path = training_info_directory, .name = 'ordered_sample_no_reflect_sgd1_outliers')
+save_as(.object = ordered_sample_no_abs_sgd1_outliers, .file_path = training_info_directory, .name = 'ordered_sample_no_abs_sgd1_outliers')
+##
+## clean up
+rm(list = c('ordered_sample_no_abs_sgd1_outliers', 'ordered_sample_no_reflect_sgd1_outliers',  'soil_data_no_reflect_sgd1_outliers', 'soil_data_no_abs_sgd1_outliers', 'molten_soil_data_no_v_o', 'reflectance_sgd1_outliers', 'absorbance_sgd1_outliers'  ))
+invisible(gc())
+##
+## ########################################################
+@
+
+<<analysis-models-cubist-sampling-methods, echo = F, cache = T, results = hide; dependson = analysis-sampling-mahalanobis-outliers-and-ordered; analysis-sampling-by  >>=
+## ########################################################
+## re fit cubist models with different sampling methods  ##
+## by Profile                                            ##
+## by profiles                                           ##
+## ordered sampling with outliers removed                ##  
+## ########################################################
+##
+## load required data
+ordered_sample_reflect <- load_as(.file_path = training_info_directory, .name = 'ordered_sample_no_reflect_sgd1_outliers')
+##
+ordered_sample_abs <- load_as(.file_path = training_info_directory, .name = 'ordered_sample_no_abs_sgd1_outliers')
+##
+sampled_by_projects <- load_as(.file_path = training_info_directory, .name = 'sampled_by_projects')
+##
+sampled_by_profiles <- load_as(.file_path = training_info_directory, .name = 'sampled_by_profiles')
+##
+## create names for coefficients
+coef_names <-paste('w', seq(400, 2450, by = 10), sep = '') 
+##
+## create argument lists for fitting cubist models to 
+## SG filtered-D1 reflectance and absorbance
+cubist_by_projects_arguments <- c(llply(sampled_by_projects, function(x,y){c(x,as.list(y))},  y = filter_sg_sub10_files[2,]), llply(sampled_by_projects, function(x,y){c(x,as.list(y))},   y = filter_sg_sub10_files[4,]))
+##
+cubist_by_profiles_arguments <- c(llply(sampled_by_profiles, function(x,y){c(x,as.list(y))},   y = filter_sg_sub10_files[2,]), llply(sampled_by_profiles, function(x,y){c(x,as.list(y))},  y = filter_sg_sub10_files[4,]))
+##
+cubist_ordered_arguments <- c(llply(ordered_sample_reflect, function(x,y){c(x,as.list(y))},  y = filter_sg_sub10_files[2,]), llply(ordered_sample_abs, function(x,y){c(x,as.list(y))},  y = filter_sg_sub10_files[4,]))
+##
+## fit the models and get summaries 
+by_projects_cubist_summaries <-  ldply(cubist_by_projects_arguments,.fun = splat(fit_cubist), .coef_names = coef_names, .keep = 1:206, .save_path = cubist_models_directory, .committees = 5, .sampling = 'by_projects')
+##
+by_profiles_cubist_summaries <-  ldply(cubist_by_profiles_arguments,.fun = splat(fit_cubist), .coef_names = coef_names, .keep = 1:206, .save_path = cubist_models_directory, .committees = 5, .sampling = 'by_profiles')
+##
+ordered_cubist_summaries <-  ldply(cubist_ordered_arguments,.fun = splat(fit_cubist), .coef_names = coef_names, .keep = 1:206, .save_path = cubist_models_directory, .committees = 5, .sampling = 'mvo_ordered')
+##
+## save
+save_as(.object = by_profiles_cubist_summaries, .file_path = cubist_models_directory, .name = 'by_profiles_cubist_summaries')
+##
+save_as(.object = by_projects_cubist_summaries, .file_path = cubist_models_directory, .name = 'by_projects_cubist_summaries')
+##
+save_as(.object = ordered_cubist_summaries, .file_path = cubist_models_directory, .name = 'ordered_cubist_summaries')
+##
+## clean up
+rm(list = c('ordered_cubist_summaries', 'by_profiles_cubist_summaries', 'by_projects_cubist_summaries', 'cubist_by_profiles_arguments', 'cubist_by_projects_arguments', 'cubist_ordered_arguments', 'ordered_sample_reflect', 'ordered_sample_abs', 'sampled_by_projects',' sampled_by_profiles') )
+##
+invisible(gc())
+##
+## ########################################################
+@
+
+
+\begin{table}[tbp]
+\caption{RMSE for validation and training data sets using cubist in conjunction with profile sampling.}
+\label{table:cubistRMSEProfiles}
+\centering
+<<table-model-summaries-cubist-by-profile, echo = F, results =tex, cache = F; dependson = functions-basic;analysis-models-cubist-sampling-methods >>=
+## ########################################################
+## create a table summarizing the cubist fit             ##
+## by profiles sampling                                   ##
+## ########################################################
+##
+## load data
+cubist_summaries <- load_as(.file_path = cubist_models_directory, .name = 'by_profiles_cubist_summaries')
+##
+## reformulate results table
+cubist_table <- cast(reshape2:::melt.data.frame(cubist_summaries, measure.var = 'RMSE', variable.name = 'statistic', id.var = c('.type', 'dataset', 'variable')), variable  ~.type +dataset)
+##
+## set row names for xtable / latex
+row.names(cubist_table) <- properties_to_latex(cubist_table$variable)
+##
+## create nicer looking column names
+names(cubist_table)[-1] <-laply(str_split(names(cubist_table)[2:5], pattern = '_'), function(x){paste(x[1], ' (', x[2],')',sep='')})
+##
+## latexify table using xtable
+cubist_xtable <- xtable(cubist_table[,-1], digits=3)
+##
+## and print this  using booktabs format
+booktabs.xtable(cubist_xtable)
+##
+## clean up
+rm(list = c('cubist_summaries', 'cubist_table','cubist_xtable'))
+invisible(gc())
+##
+## ########################################################
+@
+\end{table}
+
+\begin{table}[tbp]
+\caption{RMSE for validation and training data sets using cubist in conjunction with project sampling.}
+\label{table:cubistRMSEProjects}
+\centering
+<<table-project-summary, echo = F, results =tex, cache = F, dependson = functions-basic;analysis-models-cubist-sampling-methods >>=
+## ########################################################
+## create a table summarizing the cubist fit             ##
+## by project sampling                                   ##
+## ########################################################
+##
+## load data
+cubist_summaries <- load_as(.file_path = cubist_models_directory, .name = 'by_projects_cubist_summaries')
+##
+## reformulate results table
+cubist_table <- cast(reshape2:::melt.data.frame(cubist_summaries, measure.var = 'RMSE', variable.name = 'statistic', id.var = c('.type', 'dataset', 'variable')), variable  ~.type +dataset)
+##
+## set row names for xtable / latex
+row.names(cubist_table) <- properties_to_latex(cubist_table$variable)
+##
+## create nicer looking column names
+names(cubist_table)[-1] <-laply(str_split(names(cubist_table)[2:5], pattern = '_'), function(x){paste(x[1], ' (', x[2],')',sep='')})
+##
+## latexify table using xtable
+cubist_xtable <- xtable(cubist_table[,-1], digits=3)
+##
+## and print this  using booktabs format
+booktabs.xtable(cubist_xtable)
+##
+## clean up
+rm(list = c('cubist_summaries', 'cubist_table','cubist_xtable'))
+invisible(gc())
+##
+## ########################################################
+@
+\end{table}
+
+\begin{table}[tbp]
+\caption{RMSE for validation and training data sets using cubist in conjunction with ordered sampling with multivariate outliers removed.}
+\label{table:cubistRMSEMVO}
+\centering
+<<table-MVO-summary, echo = F, results =tex, cache = F,dependson = functions-basic;analysis-models-cubist-sampling-methods >>=
+## ########################################################
+## create a table summarizing the cubist fit             ##
+## ordered sampling                                   ##
+## ########################################################
+##
+## load data
+cubist_summaries <- load_as(.file_path = cubist_models_directory, .name = 'ordered_cubist_summaries')
+##
+## reformulate results table
+cubist_table <- cast(reshape2:::melt.data.frame(cubist_summaries, measure.var = 'RMSE', variable.name = 'statistic', id.var = c('.type', 'dataset', 'variable')), variable  ~.type +dataset)
+##
+## set row names for xtable / latex
+row.names(cubist_table) <- properties_to_latex(cubist_table$variable)
+##
+## create nicer looking column names
+names(cubist_table)[-1] <-laply(str_split(names(cubist_table)[2:5], pattern = '_'), function(x){paste(x[1], ' (', x[2],')',sep='')})
+##
+## latexify table using xtable
+cubist_xtable <- xtable(cubist_table[,-1], digits=3)
+##
+## and print this  using booktabs format
+booktabs.xtable(cubist_xtable)
+##
+## clean up
+rm(list = c('cubist_summaries', 'cubist_table','cubist_xtable'))
+invisible(gc())
+##
+## ########################################################
+@
+\end{table}
+
+
+
+
+
+\subsection{Wavelets}
+Using the deviations from the continuum, the spectra are now periodic (starting and ending at 0). We choose a waveband window $[404,2451]$ as it dyadic ($2048 = 2^{11}$)
+
+
+We present a number of approaches, one using the continuum-removed spectra one on the raw Absorbance values and another on the derivatives.
+ The wavelet coefficients are used in a generalized validation procedure where, having removed the multivariate outliers, we order the samples and removed every third value as a validation data set.
+\subsubsection{Continuum-removed spectra}
+Here, we calculate the wavelet coefficients for a Daubechies wavelet function with 2 vanishing moments. We use the deviations from the continuum of the reflectance. 
+<<wavelets-cr, echo = F, cache = T, results = hide>>=
+## a function for processing wavelets
+waveletFunction <- function(.spectra, .preProcess,.subRows, .resultsNames){
+  ## load spectra
+  spectra <- loadRename(.spectra$.fname, .spectra$.name)
+  ## pre processe
+  if(.preProcess$.type  == 'CR'){
+    processedSpectra <- t(apply(spectra,1, cHullDeviation, rangeB = .preProcess$.range))
+  }
+  
+  if(.preProcess$.type == 'none'){
+    processedSpectra <- spectra[,.preProcess$.range]
+  }
+  
+  if(.preProcess$.type == 'SGD1'){
+    processedSpectra <- spectra[,.preProcess$.range]
+  }
+  ## calculate the wavelet decomposition
+  waveletInterval <- apply(processedSpectra, 1,wd, bc = 'interval', filter.number = 2,
+                    family = 'DaubExPhase', min.scale = 2 )
+  ## extract the wavelet coefficients
+  wvCoefs <- ldply(waveletInterval, function(x){unlist(llply(2:10,waveCoefs, wdObject=x))})
+  ## calculate the variance (removing the subset rows)
+  coefVars <- apply(wvCoefs[.subRows,], 2, var)
+  ## and the order
+  varOrder <- order(coefVars, decreasing = T)
+  ## save
+  saveObjectAs(processedSpectra, .fname = .resultsNames$processedSpectra$.fname, 
+               .name = .resultsNames$processedSpectra$.name)
+  saveObjectAs(waveletInterval, .fname = .resultsNames$waveletInterval$.fname, 
+               .name = .resultsNames$waveletInterval$.name)
+  saveObjectAs(wvCoefs, .fname = .resultsNames$wvCoefs$.fname, 
+               .name = .resultsNames$wvCoefs$.name)
+  saveObjectAs(varOrder, .fname = .resultsNames$varOrder$.fname, 
+               .name = .resultsNames$varOrder$.name)
+  return(.resultsNames)
+  }
+
+crWaveletSetUp <- list(.spectra = list(.fname = 'savedData/reflectAllSG.RData',.name = 'reflectAllSG'),
+                  .preProcess = list(.type = 'CR', .range = 404:2451),
+                  .subRows = whichDataOut,
+                  .resultsNames = list(processedSpectra = list(.fname = 'savedData/reflectSGDyadicCR.RData', 
+                                                               .name = 'reflectSGDyadicCR'),
+                                      waveletInterval = list(.fname = 'savedData/reflectSGCRWaveletList.RData',
+                                                             .name = 'reflectSGCRWaveletList'),
+                                      wvCoefs = list(.fname = 'savedData/reflectSGCRWaveletCoefs.RData', 
+                                                     .name = 'reflectSGCRWaveletCoefs'),
+                                      varOrder =  list(.fname = 'savedData/reflectSGCRWaveletVarOrder.RData', 
+                                                       .name = 'reflectSGCRWaveletVarOrder')))
+## fit the model
+crWaveletResultFiles <- splat(waveletFunction)(crWaveletSetUp)      
+@
+
+<<wavelets-cr-Models, echo = F, cache = T, results = hide,eval=F>>=
+.modelSummary <- function(.which,observed,predicted){
+     modelResid <- (observed-predicted)[.which]
+     data.frame(MAE = mean(abs(modelResid)), RMSE = sqrt(mean(modelResid^2)))
+  }
+
+
+waveletModelQPFit <- function(.number, wvCoefs,.variable, .inData, trainingInfo){
+  ## create training data
+  trainingData <- data.frame(.var = .inData[trainingInfo$trainingRows,.variable], wvCoefs[trainingInfo$trainingRows,])
+  ## create formula
+  waveFormula <- makeFormula(.names = names(wvCoefs)[1:.number], .y = '.var')
+  ## create model
+  waveModel <- lm(waveFormula,trainingData )
+  ## calculate adjusted R squared
+  adjR2 <- summary(waveModel)$adj.r.squared
+  ## make prediction
+  wavePredicted <- predict(waveModel,newdata = wvCoefs)
+  
+  modelSummary <- ldply(trainingInfo,.fun= '.modelSummary', observed = .inData[,.variable], predicted = wavePredicted)
+  modelSummary$adjR2 <- adjR2
+  modelSummary$variable <- as.character(.variable)
+  modelSummary$number <- .number
+  modelSummary
+}
+
+
+waveletModelQP <- function(.processedSpectra,.variable,.maxNumber,.subRows,.inData, .varOrder,.wvCoefs){
+  ## load spectra
+  spectra <- loadRename(.processedSpectra$.fname, .processedSpectra$.name)
+  ## make pls 
+  plsData <- data.frame(.y = .inData[,.variable],spectra = I(as.matrix(spectra)))
+  .plsFormula <- as.formula(paste('.y~',paste(names(plsData)[-1],collapse='+')))
+  ## get outliers
+  outlierInfo <- outlierMV(.Data = plsData, .sc = 5, .subRows = .subRows, .dataCol=1, .formula = .plsFormula)
+  rm(plsData)
+  ## get training info
+  trainingInfo <- orderedSample(.y = .inData[,.variable],.mvOut = outlierInfo)
+  ##trainingInfo
+  ## load varOrder
+  varOrder <- loadRename(.varOrder$.fname, .varOrder$.name)
+  ## load coefficients
+  wvCoefs <- loadRename(.wvCoefs$.fname, .wvCoefs$.name)[,varOrder[1:.maxNumber]]
+  ## fit the model
+  results <- ldply(1:.maxNumber, function(.number){res <- waveletModelQPFit(.number=.number, wvCoefs = wvCoefs, .variable =.variable, .inData = .inData, trainingInfo = trainingInfo); res})
+  results
+  }
+
+waveletResultsCR <- ldply(whichProperties, function(.variable){results <- waveletModelQP(.processedSpectra = crWaveletResultFiles$processedSpectra, .variable= .variable,.inData = soilData, .subRows = whichDataOut,.maxNumber = 200 ,.varOrder =crWaveletResultFiles$varOrder,.wvCoefs = crWaveletResultFiles$wvCoefs); results})
+
+## and save
+save(waveletResultsCR, file = 'savedData/models/waveletResultsCR.RData')
+rm(waveletResultsCR)
+@
+
+The root mean-square-errors of prediction are shown in figure~\ref{fig:crWavelets} for models constructed with up to the first 200 coefficients as ordered by variance.
+\begin{figure}[tbp]
+\centering
+<<cr-waveletResults, fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 6, fig.height = 9,background = 1;1;1, cache = T>>=
+getRMSE <- function(.x){
+  data.frame(nCoefs = which.min(.x$RMSE),rmse = min(.x$RMSE),  variable = unique(.x$variable))
+  }
+waveletModelPlot <- function(resultsFname, resultsName,nCoefList){
+  ## load results 
+  .results <- loadRename( .fname = resultsFname, resultsName)
+  ## make latex friendly
+  .results$latexVar <- sapply(.results$variable,propertiesLatex)
+  ## calculate the best model by RMSE (validation)
+  nCoefDF <- ddply(.results,.(latexVar,.id), getRMSE)
+  ## save for later use
+  saveObjectAs(nCoefDF, .fname = nCoefList$.fname, .name = nCoefList$.name)
+  
+  #make the plot (validation rows only)  
+  ggplot(subset(.results,.id=='validationRows')) + 
+    facet_wrap(~latexVar,scales = 'free',ncol=2) +
+    geom_point(aes(x=number,y = RMSE),size=1) + 
+    geom_segment(data = subset(nCoefDF,.id=='validationRows'), aes(x = nCoefs, xend = nCoefs, y = rmse, yend = 0)) + 
+    geom_segment(data = subset(nCoefDF,.id=='validationRows'), aes(x = nCoefs, xend = 0, y = rmse, yend = rmse)) + 
+    xlab('Number of DWT coefficients')+
+    ylab('RMSE') + 
+    scale_x_continuous(expand = c(0,0))+
+    opts(panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(),strip.background = theme_blank()) 
+}
+
+waveletModelPlot(resultsFname = 'savedData/models/waveletResultsCR.RData', resultsName = 'waveletResultsCR',nCoefList = list(.fname = 'savedData/nCoefsCRDF.RData',.name = 'nCoefsCRDF') )
+
+
+
+@
+\caption{Root mean-square-error of predictions for various soil properties. The models were fitted by  multiple linear regression with quadratic polynomials of the wavelet coefficients ordered by their variance and performed sequentially by adding one coefficient at a time. Wavelet coefficients were calculated on the deviations from the reflectance continuum.  }\label{fig:crWavelets}
+\end{figure}
+
+\subsubsection{Absorbance}
+The root mean-square-errors of prediction are shown in figure~\ref{fig:absWavelets} for models constructed with up to the first 200  DWT coefficients as ordered by variance.
+
+
+<<wavelets-Abs, echo = F, cache = T, results = hide>>=
+## set up the required files etc
+absWaveletSetUp <- list(.spectra = list(.fname = 'savedData/absAll.RData',.name = 'absAll'),
+      .preProcess = list(.type = 'none', .range = (350:2500 %in% 404:2451) ), .subRows = whichDataOut,
+      .resultsNames = list(processedSpectra = list(.fname = 'savedData/absDyadic.RData',
+        .name = 'absDyadic'), waveletInterval = list(.fname = 'savedData/absWaveletList.RData', 
+        .name = 'absWaveletList'), wvCoefs = list(.fname = 'savedData/absWaveletCoefs.RData', 
+        .name = 'absWaveletCoefs'), varOrder =  list(.fname = 'savedData/absWaveletVarOrder.RData', 
+        .name = 'absWaveletVarOrder')))
+
+## run the wavelet fitting
+absWaveletResultFiles <- splat(waveletFunction)(absWaveletSetUp)
+
+
+@
+
+<<wavelets-Abs-Models, echo = F, cache = T, results = hide>>=
+## create quadratic polynomial models
+## source('racaFunctions.R')
+waveletResultsAbs <- ldply(whichProperties, function(.variable){results <- waveletModelQP(.processedSpectra = absWaveletResultFiles$processedSpectra, .variable= .variable,.inData = soilData, .subRows = whichDataOut,.maxNumber = 200 ,.varOrder =absWaveletResultFiles$varOrder,.wvCoefs = absWaveletResultFiles$wvCoefs); results})
+
+## and save
+save(waveletResultsAbs, file = 'savedData/models/waveletResultsAbs.RData')
+## clean up
+rm(waveletResultsAbs)
+@
+
+
+\begin{figure}[tbp]
+\centering
+<<abs-waveletResults, fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 6, fig.height = 9,background = 1;1;1, cache = T>>=
+invisible(gc())
+waveletModelPlot('savedData/models/waveletResultsAbs.RData','waveletResultsAbs',nCoefList = list(.fname = 'savedData/nCoefsAbsDF.RData',.name = 'nCoefsAbsDF') )
+@
+\caption{Root mean-square-error of predictions for various soil properties. The models were fitted by  multiple linear regression with quadratic polynomials of the wavelet coefficients ordered by their variance and performed sequentially by adding one coefficient at a time. Wavelet coefficients were calculated on the absorbance.}\label{fig:absWavelets}
+\end{figure}
+
+\subsubsection{First derivative}
+
+<<wavelets-SGD1, echo = F, cache = T, results = hide>>=
+## set utp file names and input for wavelets
+absSGD1WaveletSetUp <- list(.spectra = list(.fname = 'savedData/absAllSGD1.RData',.name = 'absAllSGD1'),
+      .preProcess = list(.type = 'SGD1', .range = (350:2500 %in% 404:2451) ), .subRows = whichDataOut,
+      .resultsNames = list(processedSpectra = list(.fname = 'savedData/absSGD1Dyadic.RData',
+        .name = 'absSGD1Dyadic'), waveletInterval = list(.fname = 'savedData/absSGD1WaveletList.RData', 
+        .name = 'absSGD1WaveletList'), wvCoefs = list(.fname = 'savedData/absSGD1WaveletCoefs.RData', 
+        .name = 'absSGD1WaveletCoefs'), varOrder =  list(.fname = 'savedData/absSGD1WaveletVarOrder.RData', 
+        .name = 'absSGD1WaveletVarOrder')))
+## run the wavelet decomposition
+absSGD1WaveletResultFiles <- splat(waveletFunction)(absSGD1WaveletSetUp)
+invisible(gc())
+@
+
+<<wavelets-SGD1-Models, echo = F, cache = T, results = hide>>=
+## create quadratic polynomial models
+waveletResultsAbsSGD1 <- ldply(whichProperties, function(.variable){
+  results <- waveletModelQP(.processedSpectra = absSGD1WaveletResultFiles$processedSpectra, 
+              .variable = .variable,.inData = soilData, .subRows = whichDataOut,.maxNumber = 200 , 
+              .varOrder =absSGD1WaveletResultFiles$varOrder,.wvCoefs = absSGD1WaveletResultFiles$wvCoefs)
+  results})
+## and save
+save(waveletResultsAbsSGD1, file = 'savedData/models/waveletResultsAbsSGD1.RData')
+rm(waveletResultsAbsSGD1)
+invisible(gc())
+@
+
+The root mean-square-errors of prediction are shown in figure~\ref{fig:SGD1Wavelets} for models constructed with up to the first 200 coefficients as ordered by variance.
+\begin{figure}[tbp]
+\centering
+<<SGD1-waveletResults, fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 6, fig.height = 9,background = 1;1;1, cache = T>>=
+## load data
+waveletModelPlot('savedData/models/waveletResultsAbsSGD1.RData','waveletResultsAbsSGD1',nCoefList = list(.fname = 'savedData/nCoefsAbsSGD1DF.RData',.name = 'nCoefsAbsSGD1DF') )
+@
+\caption{Root mean-square-error of predictions for various soil properties. The models were fitted by  multiple linear regression with quadratic polynomials of the wavelet coefficients ordered by their variance and performed sequentially by adding one coefficient at a time. Wavelet coefficients were calculated on the  first derivative of the absorbance  }\label{fig:SGD1Wavelets}
+\end{figure}
+
+\subsubsection{Wavelet coefficients used}
+For each of the spectrum types we calculated the proportion of the selected wavelet coefficients by scale. These results are summarized in figure~\ref{fig:coefSelect}. The number of coefficients corresponding to the lowest RMSE is shown in table~\ref{table:wvResults}.
+
+
+\begin{table}[tbp]
+\caption{Optimal models based on wavelet coefficients}
+\label{table:wvResults}
+\centering
+<<table-wavelet-results, echo=F, results = tex, cache = F, dependson = setup-libraries,warning=F,message=F>>=
+## format a table using booktabs in LaTeX
+nCoefLists <- list(list(.fname = 'savedData/nCoefsCRDF.RData',.name = 'nCoefsCRDF', .type = 'CR'),
+                   list(.fname = 'savedData/nCoefsAbsDF.RData',.name = 'nCoefsAbsDF', .type = 'Abs'), 
+                   list(.fname = 'savedData/nCoefsAbsSGD1DF.RData',.name = 'nCoefsAbsSGD1DF', .type= 'SGD1'))
+
+
+wvTable <- do.call('cbind',llply(nCoefLists, function(.list){
+  .results <- splat(loadRename)(.list[c('.fname','.name')])
+  .latexVar <- .results[.results$.id == 'validationRows','latexVar']
+  .results <- .results[ .results$.id == 'validationRows',c('nCoefs','rmse')]
+  .results <- data.frame(.results)
+  row.names(.results) <- .latexVar#
+  .results
+  }))
+#   cbind(nCoefAbsDF[,2:3],nCoefCRDF[,2:3],nCoefSGD1DF[,2:3])
+names(wvTable) <- paste(rep(c('Coef','RMSE'),2),rep(c('(CR)','(Abs)','(D1)'),each=2))
+# rownames(wvTable) <- nCoefAbsDF$latexVar
+wvXTable <- xtable(wvTable, digits=3)
+  print(wvXTable,sanitize.text.function = function(x){x},floating=FALSE,hline.after=NULL,
+                  add.to.row=list(pos=list(-1,0, nrow(xTab)),command=c('\\toprule ','\\midrule ','\\bottomrule ')))
+@
+\end{table}
+
+
+
+
+
+<<wavelets-coefficients-used, echo = F, cache = T, results = hide>>=
+
+library(stringr)
+## CR wavelets
+
+selectedScales <- function(.in,...){
+  ## get frequencies for each scale
+  perLevel <- tabDF(table(.in$level),ind = 'level')
+  ## find proportion for each scale
+  perLevel$proportion <- with(perLevel, count / 2^as.numeric(as.character(level)))
+  ## return
+  perLevel
+}
+
+getCoefficients <- function(wvCoefs.fname,wvCoefs.name,varOrder.fname,varOrder.name, nCoefs, variable,...){
+   wvCoefs <- loadRename(as.character(wvCoefs.fname),as.character(wvCoefs.name))
+  ## var order
+  varOrder <-  loadRename(as.character(varOrder.fname),as.character(varOrder.name))
+  ## identify number
+  ## get Names (trimmed to approriate level based on .number)
+  coefNames <- names(wvCoefs)[varOrder[1:nCoefs]]
+  ## get band centre and level
+ centreLevel <- ldply(str_split( coefNames,pattern='[[:punct:]]'), 
+                       function(x){data.frame(bandCentre=x[2],level = x[3])})
+   }
+
+
+
+## get coefficients
+## add in the appropriate levels
+nCoefLists[[1]]$resultsList <- crWaveletResultFiles
+nCoefLists[[2]]$resultsList <- absWaveletResultFiles
+nCoefLists[[3]]$resultsList <- absSGD1WaveletResultFiles
+
+nCoefLists[[1]]$resultsListAll <- list(.fname = 'savedData/models/waveletResultsCR.RData', 
+                                       .name = 'waveletResultsCR')
+nCoefLists[[2]]$resultsListAll <- list(.fname = 'savedData/models/waveletResultsAbs.RData', 
+                                       .name = 'waveletResultsAbs')
+nCoefLists[[3]]$resultsListAll <- list(.fname = 'savedData/models/waveletResultsAbsSGD1.RData', 
+                                       .name = 'waveletResultsAbsSGD1')
+
+nCoefs <- ldply(nCoefLists, function(.list){ 
+ .results <- with(.list, loadRename(.fname, .name))
+ .allResults <- with(.list$resultsListAll,loadRename(.fname, .name) )
+  .return <- data.frame(.results[ .results$.id == 'validationRows',c('nCoefs','variable')],
+                        .type = .list$.type, wvCoefs.fname = .list$resultsList$wvCoefs$.fname, 
+                        wvCoefs.name = .list$resultsList$wvCoefs$.name,  
+                        varOrder.fname = .list$resultsList$varOrder$.fname, 
+                        varOrder.name = .list$resultsList$varOrder$.name )
+ .return$RMSEP <- .results[ .results$.id == 'validationRows','rmse']
+ .return$RMSET <-  daply(.return, .(variable), function(.x,.all){
+   .number = .x$nCoefs
+   .variable = .x$variable
+   RSMET <- .all[(.all$variable == .variable)&(.all$.id == 'trainingRows')&(.all$number== .number),'RMSE']
+    },.all = .allResults)
+ 
+ .return$latexVar <- sapply(as.character(.return$variable),propertiesLatex)
+ 
+ for(.name in c('variable','.type', paste(rep(c('wvCoefs','varOrder'), each = 2), rep(c('.fname','.name'),2),sep=''))){  
+  .return[,.name] <- as.character(.return[,.name])}
+ .return
+   })
+
+waveletQPSelected <- adply(nCoefs,1, splat(getCoefficients))[,c('.type','variable','latexVar','bandCentre','level')]
+resultsWV <- ddply(waveletQPSelected, .(.type,variable), selectedScales)#adply(nCoefs,1, splat(selectedCoefficients))
+
+@
+
+\begin{figure}[tbp]
+\centering
+<<figure-coeffsused, fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 6, fig.height = 9,background = 1;1;1, cache = T,depends = wavelets-coefficients-used>>=
+## the plot
+resultsWV$olevel <-ordered(as.numeric(as.character(resultsWV$level)))
+ggplot(resultsWV) + 
+  facet_wrap(.type~.property,ncol=5) + 
+  geom_bar(aes(x=olevel,y=proportion*100))+
+  xlab('DWT scale')+
+  ylab('vis-NIR coefficients retained / \\%') + 
+  scale_y_continuous(expand = c(0,0))+
+  opts(panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(),strip.background = theme_blank())
+
+@
+\caption{Proportion of selected wavelet coefficients by scale for models of various soil properties. CR -- devations from the convex hull, Abs -- absorbance, SGD1 -- first derivative of smoothed absorbance.}\label{fig:coefSelect}
+\end{figure}
+
+\begin{figure}[tbp]
+\centering
+<<figure-coeffsusedID, fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 6, fig.height = 9,background = 1;1;1, cache = T,depends = wavelets-coefficients-used>>=
+## the plot
+theme_set(theme_bw())
+ggplot(waveletQPSelected) +
+  facet_grid(latexVar~.type)+
+  geom_rect(aes(xmin=factor2Numeric(bandCentre) - 2048 / 2^(factor2Numeric(level)+1),
+     ymin = factor2Numeric(level)-0.5, ymax = factor2Numeric(level) + 0.5,
+                 xmax =factor2Numeric(bandCentre) + 2048 / 2^(factor2Numeric(level)+1) ),
+             colour='black', fill = 'grey90',size=0.05) + 
+  scale_x_continuous('Wavelength / nm', expand = c(0.01,0)) + 
+  scale_y_continuous('Scale', expand = c(0.01,0)) + 
+  opts(panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(), strip.background = theme_blank())
+  
+@
+\caption{Tile plot showing selected wavelet coefficients by scale for models of various soil properties. CR -- devations from the convex hull, Abs -- absorbance, SGD1 -- first derivative of smoothed absorbance.}\label{fig:coefSelectID}
+\end{figure}
+
+
+\subsection{Selecting wavelet coefficients using cubist}
+As a final approach we consider selecting the wavelet coefficients using Cubist. To reduce the computational burden, we consider the first 250 coefficients as ordered by their variance. 
+
+
+<<som-functions,echo=F,cache=T,results=hide>>=
+.modelSummary <- function(.which,observed,predicted){
+     modelResid <- (observed-predicted)[.which]
+     data.frame(MAE = mean(abs(modelResid)), RMSE = sqrt(mean(modelResid^2)))
+  }
+
+waveletModelCubistFit <- function(.number, wvCoefs,.variable, .inData, trainingInfo){
+  ## create training data
+  trainingData <-  .inData[trainingInfo$trainingRows,.variable]
+  ## create formula
+  waveFormula <- makeFormula(.names = names(wvCoefs)[1:.number], .y = '.var')
+  ## create model
+  waveModel <- lm(waveFormula,trainingData )
+  ## calculate adjusted R squared
+  adjR2 <- summary(waveModel)$adj.r.squared
+  ## make prediction
+  wavePredicted <- predict(waveModel,newdata = wvCoefs)
+  
+  modelSummary <- ldply(trainingInfo,.fun= .modelSummary, observed = .inData[,.variable], predicted = wavePredicted)
+  modelSummary$adjR2 <- adjR2
+  modelSummary$variable <- as.character(.variable)
+  modelSummary$number <- .number
+  modelSummary
+}
+
+
+wvCubistFit <- function(.processedSpectra,.variables,.maxNumber, .subRows, .varOrder, .wvCoefs){
+  results <- ldply(.variables,waveletModelCubist, .coefs=.coefs,.varOrder=.varOrder,.FT = .fit,.inData=.inData,.processedSpectra=.processedSpectra)
+  results
+  }
+@
+
+<<wavelet-cubist-fitting, cache = T, results= hide,echo=F>>=
+.modelSummary <- function(.which,observed,predicted){
+     modelResid <- (observed-predicted)[.which]
+     data.frame(MAE = mean(abs(modelResid)), RMSE = sqrt(mean(modelResid^2)))
+  }
+
+waveletModelCubist <- function(.processedSpectra,.variable,.maxNumber,.subRows,.inData, .varOrder,.wvCoefs,.model,.cubistInfo){
+  ## load spectra
+  spectra <- loadRename(.processedSpectra$.fname, .processedSpectra$.name)
+  ## make pls 
+  plsData <- data.frame(.y = .inData[,.variable],spectra = I(as.matrix(spectra)))
+  .plsFormula <- as.formula(paste('.y~',paste(names(plsData)[-1],collapse='+')))
+  ## get outliers
+  outlierInfo <- outlierMV(.Data = plsData, .sc = 5, .subRows = .subRows, .dataCol=1, .formula = .plsFormula)
+  rm(plsData)
+  ## get training info
+  trainingInfo <- orderedSample(.y = .inData[,.variable],.mvOut = outlierInfo)
+  ##trainingInfo
+  ## load varOrder
+  varOrder <- loadRename(.varOrder$.fname, .varOrder$.name)
+  ## load coefficients
+  wvCoefs <- loadRename(.wvCoefs$.fname, .wvCoefs$.name)[,varOrder[1:.maxNumber]]
+  ## training y
+  yTraining <- .inData[trainingInfo$trainingRows,.variable]
+  ##  X
+  xAll <- data.frame(wvCoefs, wvCoefs^2)
+  ## named
+  names(xAll) <- paste(rep(c('l','sq'),each=.maxNumber),names(wvCoefs)[1:.maxNumber],sep='.')
+  ## subset training data
+  xTraining <- xAll[trainingInfo$trainingRows,]
+  ## fit model
+  cubistModel <- cubist(y = yTraining, x = xTraining, committees = .cubistInfo$committees,
+                        control = .cubistInfo$control)
+ ## save model
+  saveObjectAs(cubistModel, .fname = file.path(.model$.fpath,paste(.variable,.model$.name,'.RData',sep='')), .name = paste(.variable,.model$.name,sep=''))
+  ## validation and model checking
+  ## predict
+  cubistPredicted <- predict(cubistModel, newdata = xAll)
+  ## make summary
+  modelSummary <- ldply(trainingInfo,.fun= '.modelSummary', observed = .inData[,.variable], predicted = cubistPredicted)
+  ## save usage
+  variableUsage <- cubistModel$usage
+  ## return  
+  return(llist(trainingInfo, modelSummary, variableUsage)) 
+  }
+
+
+
+waveletCubistCR <- llply(whichProperties, function(.variable){
+  results <- waveletModelCubist(.processedSpectra = crWaveletResultFiles$processedSpectra, 
+                .variable= .variable,.inData = soilData, .subRows = whichDataOut,.maxNumber = 250 ,
+                .varOrder =crWaveletResultFiles$varOrder,.wvCoefs = crWaveletResultFiles$wvCoefs,
+                .model = list(.fpath = 'savedData/models',.name ='WaveletCubistModelCR' ),
+                .cubistInfo = list(committees = 5, control = cubistControl()))
+  results})
+
+waveletCubistAbs <- llply(whichProperties, function(.variable){
+  results <- waveletModelCubist(.processedSpectra = absWaveletResultFiles$processedSpectra, 
+                .variable= .variable,.inData = soilData, .subRows = whichDataOut,.maxNumber = 250 ,
+                .varOrder =absWaveletResultFiles$varOrder,.wvCoefs = absWaveletResultFiles$wvCoefs,
+                .model = list(.fpath = 'savedData/models',.name ='WaveletCubistModelAbs' ),
+                .cubistInfo = list(committees = 5, control = cubistControl()))
+  results})
+
+waveletCubistabsSGD1 <- llply(whichProperties, function(.variable){
+  results <- waveletModelCubist(.processedSpectra = absSGD1WaveletResultFiles$processedSpectra, 
+                .variable= .variable,.inData = soilData, .subRows = whichDataOut,.maxNumber = 250 ,
+                .varOrder =absSGD1WaveletResultFiles$varOrder,.wvCoefs = absSGD1WaveletResultFiles$wvCoefs,
+                .model = list(.fpath = 'savedData/models',.name ='WaveletCubistModelabsSGD1' ),
+                .cubistInfo = list(committees = 5, control = cubistControl()))
+  results})
+
+invisible(gc())
+@
+
+<<cubist-wavelet-summary, echo = F, results = hide, cache = T>>=
+## name the lists correctly
+library(stringr)
+names(waveletCubistCR) <- names(waveletCubistAbs) <- names(waveletCubistabsSGD1) <- whichProperties
+invisible(gc())
+## a function to extract the summaries from the lists of results
+getSummaries <- function(.list,using,type = 'WAV-CUB'){
+        summary <- data.frame(.list$modelSummary, using = using, type= type)
+         names(summary)[1] <- 'dataset'
+         summary
+        }
+## extract the model summaries
+waveletCubistResults <- rbind(ldply(waveletCubistCR,getSummaries, using = 'C'), 
+                              ldply(waveletCubistAbs,getSummaries, using = 'A'),
+                              ldply(waveletCubistabsSGD1,getSummaries, using = 'A-D1'))
+## latexify variable names
+waveletCubistResults$latexVar <- sapply(as.character(waveletCubistResults$.id), propertiesLatex)
+## a function to make factors numeric (level '100' becomes  100)
+factor2Numeric <- function(.x){as.numeric(as.character(.x))}
+
+## a function to get the usage and extract the coeffient names and levels
+getUsage <- function(variableUsage, using,.maxNumber = 250,...){
+  ## get the useage
+  summary <- data.frame(variableUsage,using = using )
+  ## subset those variables used in either conditions or models
+  results <-  subset(summary, ((Conditions > 0) | (Model >0)))
+  ## convert variable names to wavelet coefficients and levels
+  coefsUsed <- adply(results,1, splat(function(Coniditions,Model,Variable,...){
+    x <- unlist(str_split(Variable,pattern='[[:punct:]]'))
+   data.frame(power = x[1], band =factor2Numeric(x[3]), 
+              level = factor2Numeric(x[4]))}))
+  coefsUsed
+
+}
+  ## get the usage for each variable and pre-processing
+waveletCubistUsage <- rbind(ldply(waveletCubistCR,splat(getUsage), using = 'C'), 
+                              ldply(waveletCubistAbs,splat(getUsage), using = 'A'),
+                              ldply(waveletCubistabsSGD1,splat(getUsage), using = 'A-D1'))
+@
+
+\begin{figure}[tbp]
+\centering
+<<figure-coeffsused-cubist, fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 6, fig.height = 9,background = 1;1;1, cache = T,depends = cubist-wavelet-summary>>=
+## find the proportions for each level
+identifyUniqueWavebands <- function(power,level,...){
+  data.frame(power = paste(sort(power),collapse=':'), level = unique(level))
+}
+
+proportionByScale <- function(.data) {
+      .unique <- ddply(.data,.(band), splat(identifyUniqueWavebands))
+      perLevel <- tabDF(table(.unique$level),ind='level')
+      perLevel$proportion <- with(perLevel, count / 2^as.numeric(as.character(level)))
+      perLevel}
+
+waveCubistCoefficientProportions <- ddply(waveletCubistUsage,.(.id,using), proportionsByScale)
+## latexift
+waveCubistCoefficientProportions$latexVar <- sapply(waveCubistCoefficientProportions$.id, propertiesLatex)
+## make olevel and ordered factor
+waveCubistCoefficientProportions$olevel <-ordered(factor2Numeric(waveCubistCoefficientProportions$level))
+
+ggplot(waveCubistCoefficientProportions) + 
+  facet_wrap(using~latexVar,ncol=5) + 
+  geom_bar(aes(x=olevel,y=proportion*100))+
+  xlab('DWT scale')+
+  ylab('vis-NIR coefficients retained / \\%') + 
+  scale_y_continuous(expand = c(0,0))+
+  opts(panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(),strip.background = theme_blank())
+
+@
+\caption{Proportion of selected wavelet coefficients  by scale for models of various soil properties developed using Cubist. CR -- devations from the convex hull, Abs -- absorbance, SGD1 -- first derivative of smoothed absorbance.}\label{fig:coefSelectCubist}
+\end{figure}
+
+
+\begin{figure}[tbp]
+\centering
+<<figure-coeffsID-cubist, fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 6, fig.height = 9,background = 1;1;1, cache = T,depends = cubist-wavelet-summary>>=
+## find the proportions for each level
+waveCubistUsagePlot <- ddply(waveletCubistUsage, .(.id,using), function(.data){
+  cast(melt(.data,measure.var = c('band'),id.var = c('power','Conditions','Model','level')), value + Conditions + Model + level~power )
+})
+
+waveCubistUsagePlot$latexVar <- sapply(waveCubistUsagePlot$.id, propertiesLatex)
+ggplot(waveCubistUsagePlot) +
+  facet_grid(latexVar~using)+
+  geom_rect(aes(xmin=factor2Numeric(l) - 2048 / 2^(factor2Numeric(level)+1),
+     ymin = factor2Numeric(level)-0.5, ymax = factor2Numeric(level) + 0.5,
+                 xmax =factor2Numeric(l) + 2048 / 2^(factor2Numeric(level)+1), fill =replace(Conditions,Conditions==0,NA) ),
+             colour= 'black',size=0.05,) + 
+  scale_x_continuous('Wavelength / nm', expand = c(0.01,0)) + 
+  scale_y_continuous('Scale', expand = c(0.01,0)) + 
+  opts(panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(), strip.background = theme_blank())
+
+@
+\caption{Tile plot showing selected wavelet coefficients  by scale for models of various soil properties developed using Cubist. CR -- devations from the convex hull, Abs -- absorbance, SGD1 -- first derivative of smoothed absorbance.}\label{fig:coefSelectIDCubist}
+\end{figure}
+
+\section{Some more on mineralogy}
+\subsection{Iron oxides}
+Section~\ref{section:Fe} set out a procedure to calculate the abundance of the iron oxide minerals Hematite and Goethite. 
+Figure~\ref{fig:IronOxides} shows how these abundance calculations (based on a single waveband peak) compare with the laboratory measured iron oxide.
+
+<<fe-mineralogy-comparisons, cache = T, results = hide, echo = F>>=
+## load mineral abundances
+for(.mineral in c('Hematite','Goethite')){
+  load(paste('savedData/abundance',.mineral,'.RData',sep=''))
+}
+
+feBaseplot <- ggplot(data.frame(feCD = soilData$feCD[whichDataOut], goeth = abundanceGoethite[whichDataOut], hem = abundanceHematite[whichDataOut]))
+
+goethitePlot <- feBaseplot + geom_point(aes(x = feCD , y = goeth),size=0.75) + 
+  xlab('Measured Fe') +
+  ylab('Goethite Abundance')+
+  opts(panel.grid.major = theme_blank(), panel.grid.minor = theme_blank()) +
+  scale_x_continuous(expand = c(0,0), limit = c(0.5,16)) + 
+  scale_y_continuous(expand = c(0,0))
+
+hematitePlot <- feBaseplot + geom_point(aes(x = feCD , y = hem),size=0.75) + 
+  xlab('Measured Fe') +
+  ylab('Hematite Abundance')+
+  opts(panel.grid.major = theme_blank(), panel.grid.minor = theme_blank()) +
+  scale_x_continuous(expand = c(0,0), limit = c(0.5,16)) + 
+  scale_y_continuous(expand = c(0,0))
+
+feBothPlot <- feBaseplot + geom_point(aes(x = feCD , y = goeth +hem),size=0.75) + 
+  xlab('Measured Fe') +
+  ylab('Total Abundance')+
+  opts(panel.grid.major = theme_blank(), panel.grid.minor = theme_blank()) +
+  scale_x_continuous(expand = c(0,0), limit = c(0.5,16)) + 
+  scale_y_continuous(expand = c(0,0))
+@
+
+\begin{figure}[tbp]
+\centering
+<<figure-feSpectroscopy, fig=T, dev=tikz,echo=F, out.width = \textwidth, fig.width = 7, fig.height = 8,background = 1;1;1, cache = T,warning=F>>=
+## the plot
+grid.arrange(goethitePlot, hematitePlot, feBothPlot, nrow =3)
+@
+\caption{Laboratory-measured Iron oxide compared with spectroscopic measurements of abundance}\label{fig:IronOxides}
+\end{figure}
+
+
+\subsection{Clay minerals}
+<<clay-mineralogy-comparisons, cache = T, results = hide, echo = F>>=
+## load mineral abundances
+for(.mineral in names(clayList)){
+  load(paste('savedData/abundanceRelative',.mineral,'.RData',sep=''))
+}
+
+clayBaseplot <- ggplot(data.frame(clay = soilData$clay[whichDataOut], 
+                                 Smectite = abundanceRelativeSmectite[whichDataOut], 
+                                  Illite = abundanceRelativeIllite[whichDataOut],
+                                  Kaolinite = abundanceRelativeKaolinite[whichDataOut],
+                                  CEC= soilData$cecNH4[whichDataOut]))
+
+smectiteCECPlot <- clayBaseplot + geom_point(aes(x = CEC , y = clay * Smectite, colour = clay))  +
+scale_x_continuous(expand =c(0,0), xlim= c(0,100)) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_colour_gradientn('Clay / %', colours = brewer.pal(n=5,name = 'RdGy'))+
+  xlab('CEC') +
+  ylab('Smectite x Clay')+
+  opts(panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(), legend.title = theme_text( size = 12 * 0.8, hjust = 0, face = 'plain'))
+
+kaoliniteCECPlot <-clayBaseplot + geom_point(aes(x = CEC , y = clay * Kaolinite, colour = clay))  +
+  scale_x_continuous(expand =c(0,0), xlim= c(0,100)) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_colour_gradientn('Clay / %', colours = brewer.pal(n=5,name = 'RdGy'))+
+  xlab('CEC') +
+  ylab('Kaolinite x Clay')+
+  opts(panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(), legend.title = theme_text( size = 12 * 0.8, hjust = 0, face = 'plain'))
+
+illiteCECPlot <- clayBaseplot +geom_point(aes(x = CEC , y = clay * Illite,colour=clay))  +
+scale_x_continuous(expand =c(0,0), xlim= c(0,100)) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_colour_gradientn('Clay / %', colours = brewer.pal(n=5,name = 'RdGy'))+
+  xlab('CEC') +
+  ylab('Illite x Clay')+
+  opts(panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(), legend.title = theme_text( size = 12 * 0.8, hjust = 0, face = 'plain')) 
+@
+
+\begin{figure}[tbp]
+\centering
+<<figure-claySpectroscopy, fig=T, dev=png,echo=F, out.width = \textwidth, fig.width = 7, fig.height = 8,background = 1;1;1, cache = T,warning=F,dpi=300>>=
+## the plot
+
+## create the legend for the combined plot
+mineralCECLegend <- ggplotGrob(kaoliniteCECPlot + opts(keep ='legend_box')) 
+## one needs to provide the legend with a well-defined width
+legendCEC <- gTree(children = gList(mineralCECLegend), cl = 'legendGrob')
+widthDetails.legendGrob <- function(x) unit(3, "cm")
+## arrange the various plots, legend and axis titles
+grid.arrange(smectiteCECPlot+ opts(legend.position = 'none') + xlab(''), 
+             kaoliniteCECPlot + opts(legend.position = 'none')+ xlab(''),
+            illiteCECPlot  +  opts(legend.position = 'none')+ xlab(''),
+            legend = legendCEC,
+             nrow = 3,
+            sub = textGrob('CEC', vjust = -0.5))
+## add the a, b , c labels
+
+
+@
+\caption{Laboratory-measured CEC compared with spectroscopic measurements of clay mineral abundance abundance}\label{fig:clayCEC}
+\end{figure}
+
+\section{Identifying the best model for each property}
+We select compare the best models for each property with respect to the RMSE on the training and validation data sets. 
+The choices are Cubist (based on outlier-removed ordered sampling, CUB-MVO), quadratic polynomials on wavelet coefficients (WAV-QP). Where appropriate we consider absorbance (ABS), reflectance (REF), continuum-removed (CR) and first derivatives (SGD1).
+
+
+<<identify-models, echo = F, results = hide, cache = T, eval = T>>=
+## cubist only
+mvoResults <- subset(samplingResults, sampling =='MVO', select = c(MAE,MSE,dataset,using,variable))
+## convert the labels to common 
+levels(mvoResults$using)  <- c('RD1','AD1')
+mvoResults$using <- as.character(mvoResults$using)
+## add type
+mvoResults$type = 'CUB'
+## create RMSE
+mvoResults$RMSE <- sqrt(mvoResults$MSE)
+## add latexVar
+mvoResults$latexVar <- sapply(as.character(mvoResults$variable), propertiesLatex)
+
+## wavelet QP
+resultsWavelet <- melt(nCoefs, id.vars = c('.type','variable','latexVar'),measure.vars = c('RMSEP','RMSET'))
+names(resultsWavelet)[4:5] <- c('dataset','RMSE')
+resultsWavelet$variable <- as.character(resultsWavelet$variable)
+## convert labels to common
+resultsWavelet$using  <- as.character(factor(resultsWavelet$.type, levels = unique(resultsWavelet$.type),labels = c('C','A','AD1')))
+
+levels(resultsWavelet$dataset) <- c('validation','training')
+resultsWavelet$dataset <- as.factor(as.character(resultsWavelet$dataset))
+## add type
+resultsWavelet$type = 'WAV-QP'
+
+## wavelet + Cubist
+## convert variable to character
+waveletCubistResults$variable <- as.character(waveletCubistResults$.id)
+## convert labels to common
+levels(waveletCubistResults$using)  <- c('C','A','AD1')
+waveletCubistResults$dataset <- factor(waveletCubistResults$dataset,labels = c('training','validation'))
+
+
+
+whichCols <- intersect(intersect(names(resultsWavelet),names(mvoResults)), names(waveletCubistResults))
+
+
+bestModels <- rbind(resultsWavelet[,whichCols],mvoResults[,whichCols],waveletCubistResults[,whichCols])
+
+@
+
+
+The root mean-square-error for the training and validation data sets are shown in figure~\ref{fig:bestModel}. 
+The models identified with lowest RMSE are shown in table~\ref{table:bestModel}. In later sections, we use the best model, identified using the validation data set for prediction. The cubist models using the wavelet coefficients from the raw absorbance tend to provide the best models in terms of the validation RMSE whilst the continuum removed reflectance provides the majority of the best models identified using the training RMSE.
+The vast majority of {\em best} models are developed using Cubist in conjunction with the wavelet coefficients. 
+
+\begin{figure}[tbp]
+\centering
+<<best-model-figure, fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 7, fig.height = 9,background = 1;1;1, cache = T>>=
+ggplot(bestModels, aes(y = RMSE, x = using, shape = dataset,color=type)) +
+  geom_point(size=2)+
+  facet_wrap(~latexVar,scales='free',ncol=2) +
+  scale_x_discrete('Spectral pre-processing') +
+  opts(strip.background = theme_blank(), panel.grid.major = theme_blank(), panel.grid.minor = theme_blank())
+@
+\caption{Root mean-square-error of predictions for various soil properties and methods }\label{fig:bestModel}
+\end{figure}
+
+\begin{table}[tbp]
+\caption{Best model for each soil property. Refer to figure~\ref{fig:bestModel} for the data. The number in brackets is the RMSE.}
+\label{table:bestModel}
+\centering
+<<identify-best, echo=F, cache = F, results=tex>>=
+bestModelTable <- ddply(bestModels, .(variable,dataset), function(.data){whichMin <- which.min(.data$RMSE); min = min(.data$RMSE); .data[whichMin,c('type','using','RMSE')]})
+
+bestTable <- cast(melt(adply(bestModelTable,1,function(.row){paste(.row$type,'-',.row$using, ' (', round(.row$RMSE,3), ')', sep='')}), measure.var = 'V1', id.var = c('variable','dataset')), variable~dataset)
+rownames(bestTable) <- sapply(as.character(bestTable$variable),propertiesLatex)
+
+print(xtable(data.frame(bestTable[,2:3])),sanitize.text.function = function(x){x},floating=FALSE,hline.after=NULL,
+                  add.to.row=list(pos=list(-1,0, nrow(xTab)),command=c('\\toprule ','\\midrule ','\\bottomrule ')))
+
+@
+\end{table}
+
+<<save-best-model,echo=F,results=hide,cache=T>>=
+## save the best models
+bestModelID <- cast(melt(bestModelTable, measure.var = c('type'), id.var = c('variable', 'dataset')), 
+                    variable ~ dataset)[,c(1,3)]
+names(bestModelID) <- c('variable','type')
+
+bestModelID$using <- cast(melt(bestModelTable, measure.var = c('using'), id.var = c('variable', 'dataset')), 
+                    variable ~ dataset)$validation
+
+ list(.fpath = 'savedData/models',.name ='WaveletCubistModelabsSGD1' )
+
+bestModelSwitchType <- function(.x){
+  switch(as.character(.x), 'WAV-CUB' = 'WaveletCubistModel', 'CUB' = 'MVOCubist')
+}
+
+bestModelSwitchUsing <- function(.using){
+   switch(as.character(.using),'C' = 'CR', 'AD1' = 'absSGD1','A' = 'Abs')
+}
+
+fileEnd <- function(.x){
+  switch(as.character(.x),'CUB' = '' ,'WAV-CUB' = '.RData' ) 
+}
+
+getBestModel <- function(variable,type,using){
+  .spectra <- bestModelSwitchType(as.character(type))
+  .id <-  bestModelSwitchUsing(as.character(using))
+   .end <- fileEnd(type)
+  .fname <- paste('savedData/models/',variable,.spectra,.id,.end,sep='')
+  .name <-  paste(variable,.spectra,.id,sep='')
+  if((type == 'CUB')&(using) == 'AD1'){.id = 'abs'
+                .fname <- paste('savedData/models/',variable,.id,.spectra,.end,sep='')
+  .name <-  paste(variable,.id,.spectra,sep='')                           }
+  
+  bestModel <- loadRename(.fname,.name)
+   bestModel.fname <- paste('savedData/models/',variable,'BestModel','.RData',sep='')
+   bestModel.name <- paste(variable,'bestModel',sep='')
+  saveObjectAs(bestModel,bestModel.fname ,bestModel.name)
+  
+  data.frame(variable, type, using, .fname,.name, bestModel.fname, bestModel.name, .spectra,.id)
+ }
+  
+
+
+bestModelsFiles <- adply(bestModelID,1,splat(getBestModel))
+@
+
+
+<<make-predictions, cache = T, results = hide, echo= F>>=
+switchWaveCoefs <- function(.using){
+  switch(as.character(.using), 'C' = 'reflectSGCR', 'A' = 'abs','AD1' = 'absSGD1')
+}
+## make predictions using the best models
+bestPredictions <- alply(bestModelsFiles,1, function(.row, .which, .keep, .maxNumber){
+  ## load best model
+  bestModel <- loadRename(as.character(.row$bestModel.fname),as.character(.row$bestModel.name))
+  ## get the appropriate new data
+  if(as.character(.row$type) == 'CUB'){
+  ## file name
+    spec.fname <- paste('savedData/', as.character(.row$.id), '10SGD1.RData', sep = '' )
+    spec.name <- paste( as.character(.row$.id), '10SGD1', sep = '')
+  ## load
+    newSpectra <- loadRename(spec.fname, spec.name)
+  ## subset  
+    newSpectra <- as.data.frame(newSpectra[.which,.keep])
+    ## name columns
+    names(newSpectra) <- paste('w',seq(400,2450,by=10),sep='')
+  }
+  if(as.character(.row$type) == 'WAV-CUB'){
+   ## load order
+    .pre <- switchWaveCoefs(.row$using)
+    varOrder <- paste(.pre,'WaveletVarOrder',sep='')
+    coefs <- paste(.pre, 'WaveletCoefs',sep='')
+   .varOrder <- loadRename(.fname = paste('savedData/', varOrder, '.RData',sep = ''), .name = varOrder)
+  ## and variance   
+    .coefs <- loadRename(.fname = paste('savedData/', coefs, '.RData',sep = ''),
+                         .name = coefs)[,.varOrder[1:.maxNumber]]
+  ## make dataframe
+   newSpectra <- as.data.frame(cbind(.coefs[.which,],.coefs[.which,]^2))
+  ## names
+  names(newSpectra) <- paste(rep(c('l','sq'),each=.maxNumber),1:.maxNumber,sep='.')
+  }
+  ## predict
+  prediction <- predict(bestModel, newdata = newSpectra)
+  ## return
+  prediction},.which= 1:3171, .keep = keep10, .maxNumber = 250 )
+## name the list
+names(bestPredictions) <- as.character(bestModelsFiles$variable)
+## convert to a data frame
+bestDF <- as.data.frame(do.call('cbind',bestPredictions))
+## add the ID column
+bestDF$userPedonId <- soilData$userPedonId
+## save
+saveObjectAs(bestDF, .fname = 'savedData/predictedProperties.RData', 'predictedProperties')
+@
+
+
+
+\subsection{Distributions of predicted and measured properties}
+It is important to consider whether the distribution of the predicted and measured properties are similar. These distributions are shown in figure~\ref{fig:predictedProperties}.
+\begin{figure}[tbp]
+\centering
+<<predicted-distributions, fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 7, fig.height = 9,background = 1;1;1, cache = T,warning = F>>=
+## make a big data frame
+bigDF <- rbind(data.frame(melt(soilData,id.var = 'userPedonId',measure.var = whichProperties),type='measured'),
+      data.frame(melt(bestDF[whichDataOut,],id.var = 'userPedonId',measure.var = whichProperties ), type= 'predicted'))
+## convert to latexed variable names
+bigDF$latexVar <- sapply(as.character(bigDF$variable), propertiesLatex)
+## make the plot
+ggplot(bigDF, aes(x= value,colour = type)) + 
+  geom_density(size=1) + 
+  facet_wrap(~latexVar,scale='free',ncol=2) +
+ # scale_x_continuous(expand = c(0,0))+
+  opts(panel.grid.major = theme_blank(), panel.grid.minor = theme_blank(),strip.background = theme_blank())
+save(bigDF, file = 'savedData/bigDF.RData')               
+rm(bigDF)
+invisible(gc())
+@
+\caption{Distributions of the measured and predicted soil properties}\label{fig:predictedProperties}
+\end{figure}
+
+
+\section{Classification of spectra using predicted properties}
+In previous sections we have used Cubist to build models for various soil properties based on vis-NIR spectra.  
+In this section we include the predicted soil properties with a cubist model to develop a model for total Carbon. 
+It is hoped that the predicted properties may form the basis of a classification.
+In addition to the predicted properties, we include the various mineral abunances calculated from the spectra as well as horizon information.
+ The horizon information is {\em included} as the \raca{} project will record this information.
+ 
+ \subsection{Cubist model including predicted properties}
+
+Here we include the predicted properties, clay and iron oxide abundances, soil colour {\sc RGB} and the top depth of the horizon. 
+We also include the various forms of spectra -- Absorbance (1st Derivative) sampled at every 10th wave band, and wavelet coefficients for  deviations from the reflectance continuum,  Absorbance, and Absorbance (1st derivative).
+
+For each spectral preprocessing we identify the multivariate outliers, and perform ordered sampling to create a validation data set.
+
+<<classified-model,cache = T, echo=F, results = hide>>=
+## SDG1
+## load best predictions
+.modelSummary <- function(.which,observed,predicted){
+     modelResid <- (observed-predicted)[.which]
+     data.frame(MAE = mean(abs(modelResid)), RMSE = sqrt(mean(modelResid^2)))
+  }
+
+cubistClassify <- function(.spectra,.pre, .properties, .y,.subRows,.spectraUse, .cubistInfo){
+  ## load spectra
+  spectra <- loadRename(.spectra$.fname, .spectra$.name)
+  if(.pre$wave == F){
+    spectra <- spectra[,.spectra$.keep]
+  }
+  ## identify outliers
+  plsData <- data.frame(.y,.properties,spectra = I(as.matrix(spectra)))
+  .plsFormula <- as.formula(paste('.y~',paste(names(plsData)[-1],collapse='+')))
+  outlierInfo <- outlierMV(.Data = plsData, .sc = 5, .subRows = .subRows, .dataCol=1, .formula = .plsFormula)
+  rm(plsData)
+  ## get training info
+  trainingInfo <- orderedSample(.y,.mvOut = outlierInfo)
+  rm(spectra)
+  ## load wavelets if required
+  if(.pre$wave == T){
+    .keep <- loadRename(.spectraUse$varOrder$.fname, .spectraUse$varOrder$.name)[1:.pre$.maxNumber]
+    inspectra <-loadRename(.spectraUse$wvCoefs$.fname, .spectraUse$wvCoefs$.name)[,.keep]
+    namesCol <- names(inspectra)
+    spectra  <- as.data.frame(cbind(inspectra,inspectra^2))
+    names(spectra) <- paste(rep(c('l','sq'), each = length(namesCol)),namesCol,sep='.')
+  }
+ ## load spectra If required
+  if(.pre$wave == F){
+    spectra <- as.data.frame(loadRename(.spectraUse$.fname, .spectraUse$.name)[,.spectraUse$.keep])
+ }
+  ## the training and validation data sets
+  yTraining <- .y[trainingInfo$trainingRows]
+  yValidation <- .y[trainingInfo$validationRows]
+  # all X
+  xAll <- data.frame(.properties, spectra)
+  # training and validation X
+  xTraining <- xAll[trainingInfo$trainingRows,]
+  xValidation <- xAll[trainingInfo$validationRows,]
+  ## fit model
+  cubistModel <- cubist(y = yTraining, x = xTraining, committees = .cubistInfo$committees,
+                        control = .cubistInfo$control)
+ ## save model
+  saveObjectAs(cubistModel, .fname = .pre$.fname, .name = .pre$.name)
+  ## validation and model checking
+  ## predict
+  cubistPredicted <- predict(cubistModel, newdata = xAll[.subRows,])
+  cP <- rep(NA,nrow(xAll))
+  cP[.subRows] <- cubistPredicted
+  ## make summary
+  modelSummary <- ldply(trainingInfo,.fun= '.modelSummary', observed = .y, predicted = cP)
+  ## save usage
+  variableUsage <- cubistModel$usage
+  ## return  
+  return(llist(trainingInfo, modelSummary, variableUsage))
+ }
+
+## whichCols
+usingProperties <- whichProperties[-c(which(whichProperties %in% c('totalC','userPedonId','estOrgC')))]
+## load rgb
+soilColour <- loadRename('savedData/rgbCols.RData','rgbCols')
+## load clay mineralogy
+for(.mineral in c('Illite','Smectite','Kaolinite')){
+  .mineralAbundance <- loadRename(paste('savedData/abundanceRelative',.mineral,'.RData',sep=''),
+                                  paste('abundanceRelative',.mineral,sep=''))
+  assign(paste('abundance',.mineral,sep=''),.mineralAbundance)
+}
+for(.mineral in c('Hematite','Goethite')){
+  .mineralAbundance <- loadRename(paste('savedData/abundance',.mineral,'.RData',sep=''),
+                                  paste('abundance',.mineral,sep=''))
+  assign(paste('abundance',.mineral,sep=''),.mineralAbundance)
+}
+
+## to do with horizonTop
+.which <- (1:3171)[!is.na(soilData$horizonTop)]
+outliers <- c(1981,3144)
+whichOut <- .which[-c(which(.which %in% outliers))]
+
+
+## all properties
+allProperties <- data.frame(horizonTop = soilData$horizonTop, bestDF[,usingProperties],
+                    soilColour[,c('red','green','blue')], abundanceKaolinite, abundanceSmectite,
+                    abundanceIllite, abundanceHematite, abundanceGoethite)
+
+
+absSGD1 <- list(.spectra = list(.fname = 'savedData/abs10SGD1.RData', .name = 'abs10SGD1', .keep = keep10), 
+                 .pre = list(wave = F,.fname = 'savedData/models/totalCClassAbsD1.RData', .name = 'totalCClassAbsD1'),
+                 .y = soilData$totalC, .subRows = whichOut, 
+                  .spectraUse = list(.fname = 'savedData/abs10SGD1.RData', .name = 'abs10SGD1', .keep = keep10), 
+                 .cubistInfo = list(committees = 5, control = cubistControl()))
+
+
+absCRWav <- list(.spectra = crWaveletSetUp$.resultsNames$processedSpectra, 
+                 .pre = list(wave = T, .fname = 'savedData/models/totalCClassCRWav.RData',
+                             .name = 'totalCClassCRWav', .maxNumber = 250 ),
+                 .y = soilData$totalC, .subRows = whichOut, 
+                  .spectraUse = crWaveletSetUp$.resultsNames[c('wvCoefs','varOrder')],
+                 .cubistInfo = list(committees = 5, control = cubistControl()))
+
+
+absWav <- list(.spectra = absWaveletSetUp$.resultsNames$processedSpectra, 
+                 .pre = list(wave = T, .fname = 'savedData/models/totalCClassCRWav.RData',
+                             .name = 'totalCClassCRWav', .maxNumber = 250 ),
+                 .y = soilData$totalC, .subRows = whichOut, 
+                  .spectraUse = absWaveletSetUp$.resultsNames[c('wvCoefs','varOrder')],
+                 .cubistInfo = list(committees = 5, control = cubistControl()))
+
+
+absSGD1Wav <- list(.spectra = absSGD1WaveletSetUp$.resultsNames$processedSpectra, 
+                 .pre = list(wave = T, .fname = 'savedData/models/totalCClassCRWav.RData',
+                             .name = 'totalCClassCRWav', .maxNumber = 250 ),
+                 .y = soilData$totalC, .subRows = whichOut, 
+                  .spectraUse = absSGD1WaveletSetUp$.resultsNames[c('wvCoefs','varOrder')],
+                 .cubistInfo = list(committees = 5, control = cubistControl()))
+
+
+classifiedResults <- llply(llist(absSGD1,absCRWav, absWav,absSGD1Wav), splat(cubistClassify), .properties = allProperties)
+@
+
+\begin{figure}[tbp]
+\centering
+<<figure-totalC-classfying,  fig=T, dev=tikz,echo=F, out.width = 0.9\textwidth, fig.width = 7,fig.height=4,cache =T, background = 1;1;1, warning = F, dependson = setup-libraries>>=
+bestTotalC <- ldply(classifiedResults,getSummaries,using='A',type='CUB')
+bestTotalC$type <- as.factor(c(rep('CUB',2),rep('CUB-WAV',6)))
+bestTotalC$using <- rep(c('AD1','C','A','AD1'),each=2)
+theme_set(theme_bw())
+ggplot(bestTotalC,aes(x=interaction(using,type,drop=T),y=RMSE,colour = dataset)) +
+  geom_point() + 
+  ylab('RMSE') + 
+  xlab('Pre-processing') + 
+  opts(panel.grid.major = theme_blank(), panel.grid.minor = theme_blank())
+invisible(gc())
+@
+
+<<best-totalC-variables,echo=F,reuslts=hide,cache=T>>=
+getUsageAllProperties <- function(.list,using,type){
+summary <- data.frame(.list$variableUsage,using = using, type )
+  ## subset those variables used in either conditions or models
+  results <-  subset(summary, ((Conditions > 0) | (Model >0)))  
+}
+
+usageTotalC <- ldply(classifiedResults,getUsageAllProperties,using='A',type='CUB')
+
+
+usageTotalC$type <- sapply(usageTotalC$.id, function(.x){switch(.x, 'absSGD1' = 'AD1', 'absCRWav' = 'C','absWav' = 'A','absSGD1Wav' = 'AD1')})
+usageTotalC$using <- sapply(usageTotalC$.id, function(.x){switch(.x, 'absSGD1' = 'CUB', 'absCRWav' = 'CUB-WAV','absWav' = 'CUB-WAV','absSGD1Wav' = 'CUB-WAV')})
+@
+
+\caption{Performance of cubist models including predicted soil property information as well as spectra}\label{fig:cubistPerform}
+\end{figure}
+
+\begin{itemize}
+\item Do we include horizon depth information? 
+\item Preliminary results show slight decrease:, the best total C MSE pre stratification 1.682 / 2.483 for training / validation using $- {\rm log} \left(R \right)$. Post stratification this reduces below 1.5 for some strata, increases above 2 for others.
+\end{itemize}
+
+[To Do]
+\begin{itemize}
+\item Refine stratification procedure
+\item Better usage of mineralogical information
+\end{itemize}
+
+
+\bibliography{spectraBib}
+
+
+\end{document}
